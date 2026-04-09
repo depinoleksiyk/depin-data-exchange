@@ -10,3 +10,5 @@ test-ledger/
 .DS_Store
 .vercel
 *.log
+WORKLOG.md
+REVIEWS.md
