@@ -20,6 +20,9 @@ const PROGRAM_ID = process.env.PROGRAM_ID || '5mnqN7onSgqy9tBCTJ46N2mGr4Ty68fvCg
 
 const connection = new Connection(RPC_URL, 'confirmed');
 
+// Replay protection — track used tx signatures
+const usedTxSignatures = new Set();
+
 // Sample datasets for demo
 const SAMPLE_DATA = {
   GPS: [
@@ -65,6 +68,11 @@ app.post('/v1/query/:listingId', async (req, res) => {
     });
   }
 
+  // Replay protection — reject reused tx signatures
+  if (usedTxSignatures.has(paymentTx)) {
+    return res.status(402).json({ error: 'Transaction signature already used' });
+  }
+
   // Verify payment transaction exists
   try {
     const txInfo = await connection.getTransaction(paymentTx, {
@@ -75,6 +83,8 @@ app.post('/v1/query/:listingId', async (req, res) => {
     if (!txInfo || (txInfo.meta && txInfo.meta.err)) {
       return res.status(402).json({ error: 'Payment not verified' });
     }
+
+    usedTxSignatures.add(paymentTx);
   } catch (err) {
     console.log(`[gateway] payment check failed: ${err.message}`);
     return res.status(402).json({ error: 'Payment verification failed' });

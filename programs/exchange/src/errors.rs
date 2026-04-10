@@ -16,4 +16,16 @@ pub enum ExchangeError {
     PaymentOverflow,
     #[msg("Provider name exceeds maximum length")]
     NameTooLong,
+    #[msg("Rating must be between 1 and 5")]
+    InvalidRating,
+    #[msg("Subscription duration must be 1-24 months")]
+    InvalidDuration,
+    #[msg("Commission rate exceeds maximum")]
+    InvalidCommission,
+    #[msg("Listing title exceeds maximum length")]
+    TitleTooLong,
+    #[msg("Listing description exceeds maximum length")]
+    DescriptionTooLong,
+    #[msg("Subscription is still active, cannot renew")]
+    SubscriptionStillActive,
 }

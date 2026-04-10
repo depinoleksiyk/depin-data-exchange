@@ -35,4 +35,20 @@ pub mod exchange {
             price_per_query, price_subscription_monthly,
         )
     }
+
+    pub fn subscribe(ctx: Context<Subscribe>, duration_months: u8) -> Result<()> {
+        instructions::subscribe::handler(ctx, duration_months)
+    }
+
+    pub fn query_data(ctx: Context<QueryData>) -> Result<()> {
+        instructions::query_data::handler(ctx)
+    }
+
+    pub fn rate_listing(ctx: Context<RateListing>, rating: u8) -> Result<()> {
+        instructions::rate_listing::handler(ctx, rating)
+    }
+
+    pub fn renew_subscription(ctx: Context<RenewSubscription>, duration_months: u8) -> Result<()> {
+        instructions::renew_subscription::handler(ctx, duration_months)
+    }
 }
