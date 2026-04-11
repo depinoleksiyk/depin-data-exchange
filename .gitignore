@@ -12,3 +12,5 @@ test-ledger/
 *.log
 WORKLOG.md
 REVIEWS.md
+REFERENCES.md
+deploy-keypair.json

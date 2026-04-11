@@ -9,7 +9,7 @@ exchange = "5mnqN7onSgqy9tBCTJ46N2mGr4Ty68fvCg4HqK5TsdTo"
 
 [provider]
 cluster = "devnet"
-wallet = "~/.config/solana/id.json"
+wallet = "./deploy-keypair.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
