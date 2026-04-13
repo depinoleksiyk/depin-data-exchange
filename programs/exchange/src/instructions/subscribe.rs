@@ -110,7 +110,7 @@ pub fn handler(ctx: Context<Subscribe>, duration_months: u8) -> Result<()> {
     if provider_amount > 0 {
         token::transfer(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.buyer_usdc.to_account_info(),
                     to: ctx.accounts.provider_usdc.to_account_info(),
@@ -125,7 +125,7 @@ pub fn handler(ctx: Context<Subscribe>, duration_months: u8) -> Result<()> {
     if commission > 0 {
         token::transfer(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.buyer_usdc.to_account_info(),
                     to: ctx.accounts.treasury_usdc.to_account_info(),
