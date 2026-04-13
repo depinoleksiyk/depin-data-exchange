@@ -1,16 +1,18 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet, useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { SystemProgram } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
-import { useProgram, useReadonlyProgram, getExchangePDA, getProviderPDA, getListingPDA } from '../lib/useProgram';
+import { getMarketplace, getExchangePDA, getProviderPDA, getListingPDA } from '../lib/useProgram';
 import { PROGRAM_ID } from '../lib/constants';
 
 export default function ProviderPage() {
   const { publicKey } = useWallet();
-  const { program } = useProgram();
-  const { program: readonlyProgram, connection } = useReadonlyProgram();
+  const { connection } = useConnection();
+  const anchorWallet = useAnchorWallet();
+  const program = anchorWallet ? getMarketplace(connection, anchorWallet) : null;
+  const readonlyProgram = getMarketplace(connection);
 
   const [providerRegistered, setProviderRegistered] = useState(false);
   const [providerName, setProviderName] = useState('');

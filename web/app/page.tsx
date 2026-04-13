@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useReadonlyProgram } from './lib/useProgram';
+import { useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
+import { getMarketplace } from './lib/useProgram';
 import { PROGRAM_ID } from './lib/constants';
 
 interface DataListing {
@@ -36,7 +37,9 @@ const DEMO_LISTINGS: DataListing[] = [
 const DATA_TYPES = ['All', 'GPS', 'Weather', 'Network', 'Camera'];
 
 export default function MarketplacePage() {
-  const { program, connection } = useReadonlyProgram();
+  const { connection } = useConnection();
+  const anchorWallet = useAnchorWallet();
+  const program = getMarketplace(connection);
   const [listings, setListings] = useState<DataListing[]>(DEMO_LISTINGS);
   const [typeFilter, setTypeFilter] = useState('All');
   const [search, setSearch] = useState('');
@@ -77,7 +80,7 @@ export default function MarketplacePage() {
         setChainLoaded(true);
       }
     } catch (err) {
-      console.error('Failed to fetch listings', err);
+      console.error(err);
     }
   }, [program, connection]);
 

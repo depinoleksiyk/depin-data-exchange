@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use anchor_lang::prelude::*;
 
 mod constants;
@@ -6,7 +7,9 @@ mod instructions;
 mod state;
 
 use instructions::*;
+use state::*;
 
+// Marketplace logic
 declare_id!("5mnqN7onSgqy9tBCTJ46N2mGr4Ty68fvCg4HqK5TsdTo");
 
 #[program]

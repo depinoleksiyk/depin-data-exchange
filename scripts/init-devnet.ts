@@ -29,8 +29,8 @@ async function main() {
   try {
     usdcMint = await createMint(connection, walletKeypair, walletKeypair.publicKey, null, 6);
     console.log('USDC mint created:', usdcMint.toBase58());
-  } catch (err: any) {
-    console.error('Mint creation failed:', err.message);
+  } catch (error) {
+    console.error('Mint creation failed:', String(error));
     return;
   }
 
@@ -61,11 +61,11 @@ async function main() {
         .rpc();
       console.log('Exchange initialized:', tx);
     }
-  } catch (err: any) {
-    if (err.message?.includes('already in use')) {
+  } catch (error) {
+    if (String(error).includes('already in use')) {
       console.log('Exchange already exists');
     } else {
-      console.error('Init failed:', err.message?.slice(0, 200));
+      console.error('Init failed:', String(error).substring(0, 150));
     }
   }
 
@@ -91,8 +91,8 @@ async function main() {
         .rpc();
       console.log('Provider registered:', tx);
     }
-  } catch (err: any) {
-    console.error('Register failed:', err.message?.slice(0, 200));
+  } catch (error) {
+    console.error('Register failed:', String(error).substring(0, 150));
   }
 
   // 5. Create demo listings
@@ -125,8 +125,8 @@ async function main() {
         })
         .rpc();
       console.log(`Listing "${l.title}" created:`, tx);
-    } catch (err: any) {
-      console.error(`Listing "${l.title}" failed:`, err.message?.slice(0, 200));
+    } catch (error) {
+      console.error(`Listing "${l.title}" failed:`, String(error).substring(0, 150));
     }
   }
 
