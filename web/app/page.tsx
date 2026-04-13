@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useReadonlyProgram } from './lib/useProgram';
 import { PROGRAM_ID } from './lib/constants';
 
@@ -44,11 +45,7 @@ export default function MarketplacePage() {
   const fetchListings = useCallback(async () => {
     if (!program) return;
     try {
-      const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
-        filters: [
-          { dataSize: 8 + 32 + 8 + 1 + (4 + 64) + (4 + 256) + 8 + 8 + 8 + 8 + 8 + 1 + 65 + 1 },
-        ],
-      });
+      const accounts = await connection.getProgramAccounts(PROGRAM_ID);
 
       if (accounts.length === 0) return;
 
@@ -126,9 +123,10 @@ export default function MarketplacePage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map((listing, idx) => (
-          <div
+          <Link
             key={listing.pubkey || idx}
-            className="bg-white border border-earth-200 rounded-xl p-5 hover:border-forest/30 hover:shadow-sm transition-all group"
+            href={`/listing/${listing.id}`}
+            className="bg-white border border-earth-200 rounded-xl p-5 hover:border-forest/30 hover:shadow-sm transition-all group block"
           >
             <div className="flex items-start justify-between mb-3">
               <span className={`text-xs font-medium px-2 py-0.5 rounded ${
@@ -154,7 +152,7 @@ export default function MarketplacePage() {
             <div className="mt-2 text-xs text-earth-300">
               {listing.totalQueries.toLocaleString()} queries &middot; by {listing.provider}
             </div>
-          </div>
+          </Link>
         ))}
       </div>
     </div>
