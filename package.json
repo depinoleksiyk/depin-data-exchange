@@ -1,0 +1,19 @@
+{
+  "name": "depin-data-exchange",
+  "version": "1.0.0",
+  "description": "A decentralized marketplace for buying and selling verified IoT and DePIN data streams on Solana.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
+    "typescript": "^6.0.2"
+  }
+}
