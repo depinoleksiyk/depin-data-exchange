@@ -1,0 +1,17 @@
+{
+  "name": "depin-data-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Data delivery gateway — verifies payment, delivers encrypted data",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0"
+  }
+}
