@@ -1,12 +1,16 @@
 node_modules/
 .next/
 out/
+
+# secrets
 .env
 .env.*
 !.env.example
+
+# solana
 target/
 .anchor/
 test-ledger/
+
 .DS_Store
-.vercel
 *.log
