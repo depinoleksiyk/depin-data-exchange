@@ -1,7 +1,7 @@
 import './globals.css';
 import Link from 'next/link';
 import { SolanaProviders } from './providers';
-import { WalletButton } from './WalletButton';
+import { WalletChip } from './WalletChip';
 
 export const metadata = {
   title: 'DePIN Data Exchange',
@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   </Link>
                 </nav>
               </div>
-              <WalletButton />
+              <WalletChip />
             </div>
           </header>
           <main>{children}</main>
