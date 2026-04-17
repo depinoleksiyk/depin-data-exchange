@@ -1,0 +1,1101 @@
+{
+  "address": "5mnqN7onSgqy9tBCTJ46N2mGr4Ty68fvCg4HqK5TsdTo",
+  "metadata": {
+    "name": "exchange",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Marketplace for verified IoT and DePIN data"
+  },
+  "instructions": [
+    {
+      "name": "create_listing",
+      "discriminator": [
+        18,
+        168,
+        45,
+        24,
+        191,
+        31,
+        117,
+        54
+      ],
+      "accounts": [
+        {
+          "name": "exchange",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  97,
+                  116,
+                  97,
+                  95,
+                  101,
+                  120,
+                  99,
+                  104,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              },
+              {
+                "kind": "arg",
+                "path": "listing_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider_wallet",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "listing_id",
+          "type": "u64"
+        },
+        {
+          "name": "data_type",
+          "type": {
+            "defined": {
+              "name": "DataType"
+            }
+          }
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "price_per_query",
+          "type": "u64"
+        },
+        {
+          "name": "price_subscription_monthly",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "exchange",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  97,
+                  116,
+                  97,
+                  95,
+                  101,
+                  120,
+                  99,
+                  104,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "commission_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "query_data",
+      "discriminator": [
+        231,
+        249,
+        109,
+        135,
+        245,
+        241,
+        217,
+        183
+      ],
+      "accounts": [
+        {
+          "name": "exchange",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  97,
+                  116,
+                  97,
+                  95,
+                  101,
+                  120,
+                  99,
+                  104,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.listing_id",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "subscription",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  117,
+                  98,
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "rate_listing",
+      "discriminator": [
+        253,
+        20,
+        20,
+        123,
+        246,
+        1,
+        61,
+        139
+      ],
+      "accounts": [
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.listing_id",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "subscription",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  117,
+                  98,
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "rating",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "register_provider",
+      "discriminator": [
+        254,
+        209,
+        54,
+        184,
+        46,
+        197,
+        109,
+        78
+      ],
+      "accounts": [
+        {
+          "name": "provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "renew_subscription",
+      "discriminator": [
+        45,
+        75,
+        154,
+        194,
+        160,
+        10,
+        111,
+        183
+      ],
+      "accounts": [
+        {
+          "name": "exchange",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  97,
+                  116,
+                  97,
+                  95,
+                  101,
+                  120,
+                  99,
+                  104,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.listing_id",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "subscription",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  117,
+                  98,
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_usdc",
+          "writable": true
+        },
+        {
+          "name": "provider_usdc",
+          "writable": true
+        },
+        {
+          "name": "treasury_usdc",
+          "writable": true
+        },
+        {
+          "name": "buyer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "duration_months",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "subscribe",
+      "discriminator": [
+        254,
+        28,
+        191,
+        138,
+        156,
+        179,
+        183,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "exchange",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  97,
+                  116,
+                  97,
+                  95,
+                  101,
+                  120,
+                  99,
+                  104,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.listing_id",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "subscription",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  117,
+                  98,
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer_usdc",
+          "writable": true
+        },
+        {
+          "name": "provider_usdc",
+          "writable": true
+        },
+        {
+          "name": "treasury_usdc",
+          "writable": true
+        },
+        {
+          "name": "provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "duration_months",
+          "type": "u8"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "DataExchange",
+      "discriminator": [
+        82,
+        227,
+        145,
+        200,
+        32,
+        65,
+        73,
+        61
+      ]
+    },
+    {
+      "name": "DataListing",
+      "discriminator": [
+        75,
+        232,
+        231,
+        86,
+        134,
+        68,
+        100,
+        8
+      ]
+    },
+    {
+      "name": "DataProvider",
+      "discriminator": [
+        163,
+        70,
+        109,
+        85,
+        172,
+        57,
+        24,
+        63
+      ]
+    },
+    {
+      "name": "DataSubscription",
+      "discriminator": [
+        52,
+        227,
+        98,
+        107,
+        150,
+        217,
+        8,
+        3
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Only the exchange authority can do this"
+    },
+    {
+      "code": 6001,
+      "name": "ListingNotActive",
+      "msg": "This data listing is not active"
+    },
+    {
+      "code": 6002,
+      "name": "SubscriptionExpired",
+      "msg": "Data subscription has expired"
+    },
+    {
+      "code": 6003,
+      "name": "QueryLimitReached",
+      "msg": "Query limit reached for this subscription"
+    },
+    {
+      "code": 6004,
+      "name": "InsufficientPayment",
+      "msg": "Insufficient USDC for this purchase"
+    },
+    {
+      "code": 6005,
+      "name": "PaymentOverflow",
+      "msg": "Calculation overflow in payment"
+    },
+    {
+      "code": 6006,
+      "name": "NameTooLong",
+      "msg": "Provider name exceeds maximum length"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidRating",
+      "msg": "Rating must be between 1 and 5"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidDuration",
+      "msg": "Subscription duration must be 1-24 months"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidCommission",
+      "msg": "Commission rate exceeds maximum"
+    },
+    {
+      "code": 6010,
+      "name": "TitleTooLong",
+      "msg": "Listing title exceeds maximum length"
+    },
+    {
+      "code": 6011,
+      "name": "DescriptionTooLong",
+      "msg": "Listing description exceeds maximum length"
+    },
+    {
+      "code": 6012,
+      "name": "SubscriptionStillActive",
+      "msg": "Subscription is still active, cannot renew"
+    }
+  ],
+  "types": [
+    {
+      "name": "DataExchange",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "commission_bps",
+            "type": "u16"
+          },
+          {
+            "name": "total_listings",
+            "type": "u64"
+          },
+          {
+            "name": "total_transactions",
+            "type": "u64"
+          },
+          {
+            "name": "usdc_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DataListing",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "provider",
+            "type": "pubkey"
+          },
+          {
+            "name": "listing_id",
+            "type": "u64"
+          },
+          {
+            "name": "data_type",
+            "type": {
+              "defined": {
+                "name": "DataType"
+              }
+            }
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          },
+          {
+            "name": "price_per_query",
+            "type": "u64"
+          },
+          {
+            "name": "price_subscription_monthly",
+            "type": "u64"
+          },
+          {
+            "name": "total_queries",
+            "type": "u64"
+          },
+          {
+            "name": "total_revenue",
+            "type": "u64"
+          },
+          {
+            "name": "quality_score",
+            "type": "u8"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "zk_attestation",
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DataProvider",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "total_listings",
+            "type": "u16"
+          },
+          {
+            "name": "total_revenue",
+            "type": "u64"
+          },
+          {
+            "name": "avg_quality_score",
+            "type": "u8"
+          },
+          {
+            "name": "is_verified",
+            "type": "bool"
+          },
+          {
+            "name": "devices_registered",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DataSubscription",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "listing",
+            "type": "pubkey"
+          },
+          {
+            "name": "started_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "queries_used",
+            "type": "u64"
+          },
+          {
+            "name": "queries_limit",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DataType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Gps"
+          },
+          {
+            "name": "Weather"
+          },
+          {
+            "name": "Network"
+          },
+          {
+            "name": "Camera"
+          }
+        ]
+      }
+    }
+  ]
+}
