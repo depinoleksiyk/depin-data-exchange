@@ -302,11 +302,76 @@ export default function ProviderPage() {
         </Reveal>
       ) : (
         <>
+          {(provider.stakeAmount === 0n || provider.totalListings === 0) && exchange && (
+            <Reveal>
+              <div
+                className="panel p-6 mb-6 relative overflow-hidden"
+                style={{ background: 'linear-gradient(135deg, #fdf8ec 0%, #f3ecdc 100%)' }}
+              >
+                <div
+                  aria-hidden
+                  className="absolute -top-12 -left-12 h-40 w-40 rounded-full blur-3xl opacity-50"
+                  style={{ background: 'rgba(45, 90, 39, 0.22)' }}
+                />
+                <div className="relative">
+                  <div className="text-xs uppercase tracking-[0.16em] text-ink-soft">Getting started</div>
+                  <h2 className="mt-1 font-display text-xl">
+                    {provider.stakeAmount === 0n
+                      ? 'Stake SOL to unlock listings'
+                      : 'Publish your first listing'}
+                  </h2>
+                  <ol className="mt-4 space-y-2.5 text-sm text-ink-muted">
+                    <OnboardStep
+                      num="1"
+                      done={provider.stakeAmount > 0n}
+                      title={`Stake at least ${(Number(exchange.minStakeLamports) / LAMPORTS_PER_SOL).toFixed(2)} SOL`}
+                      body="Your stake is slashable collateral — it proves you'll stand by the data you sell. Starts unlocking after the lock period ends."
+                    />
+                    <OnboardStep
+                      num="2"
+                      done={provider.totalListings > 0}
+                      title="Publish a listing"
+                      body="Title, one-line pitch, data type, per-query + monthly prices. Buyers see it in the marketplace on the next block."
+                    />
+                    <OnboardStep
+                      num="3"
+                      done={false}
+                      title="Commit a snapshot when ready"
+                      body="Once you have a dataset to back it, click 'Commit snapshot' on the listing to publish a keccak Merkle root buyers can spot-check."
+                    />
+                  </ol>
+                  {provider.stakeAmount === 0n && (
+                    <p className="mt-4 text-[12px] text-ink-soft">
+                      Need devnet SOL? Run{' '}
+                      <code className="font-mono bg-earth-100 px-1.5 py-0.5 rounded text-ink">
+                        solana airdrop 1 {publicKey.toBase58().slice(0, 6)}… --url devnet
+                      </code>{' '}
+                      or grab it from the{' '}
+                      <a
+                        href="https://faucet.solana.com/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="link-plain"
+                      >
+                        official faucet
+                      </a>
+                      .
+                    </p>
+                  )}
+                </div>
+              </div>
+            </Reveal>
+          )}
+
           <div className="grid md:grid-cols-4 gap-3 mb-8 animate-fadeUp" style={{ animationDelay: '120ms' }}>
             <StatTile
               label="Staked"
               value={<><CountUp value={Number(provider.stakeAmount) / LAMPORTS_PER_SOL} decimals={3} /> SOL</>}
-              hint={`min ${exchange ? (Number(exchange.minStakeLamports) / LAMPORTS_PER_SOL).toFixed(2) : '—'} SOL · lock ${relativeTime(provider.stakeLockedUntil)}`}
+              hint={
+                provider.stakeAmount === 0n
+                  ? `min ${exchange ? (Number(exchange.minStakeLamports) / LAMPORTS_PER_SOL).toFixed(2) : '—'} SOL — not yet staked`
+                  : `min ${exchange ? (Number(exchange.minStakeLamports) / LAMPORTS_PER_SOL).toFixed(2) : '—'} SOL · unlocks ${relativeTime(provider.stakeLockedUntil)}`
+              }
               tone="forest"
             />
             <StatTile
@@ -486,5 +551,35 @@ export default function ProviderPage() {
 
       <Toast message={toast} onDismiss={() => setToast(null)} />
     </div>
+  );
+}
+
+function OnboardStep({
+  num,
+  title,
+  body,
+  done,
+}: {
+  num: string;
+  title: string;
+  body: string;
+  done: boolean;
+}) {
+  return (
+    <li className="flex items-start gap-3">
+      <span
+        className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-colors ${
+          done ? 'bg-forest text-cream' : 'bg-earth-100 text-ink'
+        }`}
+      >
+        {done ? '✓' : num}
+      </span>
+      <div>
+        <div className={`text-sm font-medium ${done ? 'text-ink-soft line-through' : 'text-ink'}`}>
+          {title}
+        </div>
+        <div className="text-[12px] leading-relaxed text-ink-soft">{body}</div>
+      </div>
+    </li>
   );
 }
