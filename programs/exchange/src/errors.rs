@@ -28,4 +28,34 @@ pub enum ExchangeError {
     DescriptionTooLong,
     #[msg("Subscription is still active, cannot renew")]
     SubscriptionStillActive,
+
+    // new
+    #[msg("This subscription has already submitted a rating")]
+    AlreadyRated,
+    #[msg("Signer is not the configured quality oracle")]
+    NotQualityOracle,
+    #[msg("Quality score must be in the 0-100 range")]
+    InvalidQualityScore,
+    #[msg("Provider has not staked enough lamports to list")]
+    InsufficientStake,
+    #[msg("Staked lamports are still locked")]
+    StakeLocked,
+    #[msg("Provider quality is above the slash threshold")]
+    QualityAboveThreshold,
+    #[msg("Provider has not been below threshold long enough to slash")]
+    SlashGraceNotElapsed,
+    #[msg("Slash amount exceeds current stake")]
+    SlashExceedsStake,
+    #[msg("Merkle proof does not match committed snapshot root")]
+    InvalidMerkleProof,
+    #[msg("No snapshot has been committed for this listing")]
+    NoSnapshot,
+    #[msg("Access key hash must be exactly 32 bytes")]
+    InvalidAccessKeyHash,
+    #[msg("Subscription does not have an active access key")]
+    NoAccessKey,
+    #[msg("Stake amount must be greater than zero")]
+    ZeroStake,
+    #[msg("Unstake amount exceeds staked amount")]
+    UnstakeExceedsStake,
 }

@@ -14,3 +14,9 @@ test-ledger/
 
 .DS_Store
 *.log
+
+# local keypairs + ephemeral state
+oracle-keypair.json
+usdc-mint.json
+gateway/data/
+
