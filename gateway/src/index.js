@@ -11,6 +11,7 @@ const logger = require('./logger');
 const db = require('./db');
 const chain = require('./chain');
 const data = require('./data');
+const crypto = require('node:crypto');
 const {
   hashKey,
   parseBearer,
@@ -72,7 +73,12 @@ const authedLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => {
     const bearer = parseBearer(req.headers.authorization);
-    if (bearer) return `bearer:${bearer.slice(0, 16)}`;
+    if (bearer) {
+      // Use SHA-256 of the full bearer so two tokens sharing a 16-char
+      // prefix land in different buckets, and so the raw bearer never
+      // reaches the limiter's internal key store.
+      return `bearer:${crypto.createHash('sha256').update(bearer).digest('hex')}`;
+    }
     return `ip:${req.ip || 'unknown'}`;
   },
 });
@@ -315,7 +321,10 @@ app.post('/v1/listings/:id/challenge', async (req, res) => {
     const ch = await listingSources.createChallenge(req.params.id);
     return res.json(ch);
   } catch (err) {
-    return problem(res, err?.status || 500, 'challenge_failed', err.message || 'unknown');
+    const status = err?.status || 500;
+    const publicMsg = status < 500 ? err.message || 'challenge rejected' : 'internal error';
+    logger.warn({ status, err: err.message }, 'challenge failed');
+    return problem(res, status, 'challenge_failed', publicMsg);
   }
 });
 
@@ -336,7 +345,10 @@ app.put('/v1/listings/:id/source', async (req, res) => {
     });
     return res.json({ ok: true, ...result });
   } catch (err) {
-    return problem(res, err?.status || 500, 'bind_failed', err.message || 'unknown');
+    const status = err?.status || 500;
+    const publicMsg = status < 500 ? err.message || 'bind rejected' : 'internal error';
+    logger.warn({ status, err: err.message }, 'bind failed');
+    return problem(res, status, 'bind_failed', publicMsg);
   }
 });
 
@@ -418,7 +430,11 @@ app.post('/v1/pay-with-sol', async (req, res) => {
       { status, code, msg: err?.message, stack: err?.stack?.split('\n').slice(0, 4) },
       'pay-with-sol rejected'
     );
-    return problem(res, status, code, err.message || 'unknown error');
+    // Expose err.message only on 4xx validation problems — those are
+    // deliberately shaped messages the client needs to act on. 5xx
+    // internal failures get a generic code to avoid leaking internals.
+    const publicMsg = status >= 400 && status < 500 ? err.message || 'request rejected' : 'internal error';
+    return problem(res, status, code, publicMsg);
   }
 });
 
@@ -474,7 +490,8 @@ app.get('/v1/subscription', async (req, res) => {
       accessKeyActive: sub.accessKeyActive,
     });
   } catch (err) {
-    return problem(res, 400, 'invalid_pubkey', err.message);
+    logger.debug({ err: err.message }, 'subscription lookup failed');
+    return problem(res, 400, 'invalid_pubkey', 'listing or buyer is not a valid pubkey');
   }
 });
 
@@ -492,7 +509,11 @@ const wss = new WebSocketServer({ server, path: '/events' });
 
 wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'hello', programId: config.programId }));
-  ws.on('error', () => {}); // keep server alive on client aborts
+  ws.on('error', (err) => {
+    // Don't crash the gateway on a misbehaving client, but do record it so
+    // floods / abuse / TLS hiccups are visible in logs and metrics.
+    logger.warn({ err: err?.message }, 'ws client error');
+  });
 });
 
 function broadcast(msg) {
