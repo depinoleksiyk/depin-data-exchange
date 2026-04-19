@@ -66,6 +66,42 @@ export async function authedQuery(
   return body;
 }
 
+export async function getListingSource(listing: string) {
+  const r = await fetch(`${baseUrl()}/v1/listings/${listing}/source`);
+  if (!r.ok) return { bound: false };
+  return r.json();
+}
+
+export async function requestSourceChallenge(listing: string) {
+  const r = await fetch(`${baseUrl()}/v1/listings/${listing}/challenge`, { method: 'POST' });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body?.message || body?.error || `challenge failed: ${r.status}`);
+  return body as {
+    nonce: string;
+    listing: string;
+    provider: string;
+    expiresAt: number;
+    message: string;
+  };
+}
+
+export async function bindListingSource(params: {
+  listing: string;
+  url: string;
+  secret?: string;
+  nonce: string;
+  signature: string;
+}) {
+  const r = await fetch(`${baseUrl()}/v1/listings/${params.listing}/source`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body?.message || body?.error || `bind failed: ${r.status}`);
+  return body;
+}
+
 export async function payWithSol(params: {
   serializedTx: string;
   listing: string;

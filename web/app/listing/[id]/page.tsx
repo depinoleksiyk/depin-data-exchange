@@ -43,7 +43,7 @@ import { StatTile } from '../../components/StatTile';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import { Reveal } from '../../components/Reveal';
 import { CountUp } from '../../components/CountUp';
-import { authedQuery, issueAccessKey, payWithSol, samplePreview, sampleProof } from '../../lib/gateway';
+import { authedQuery, getListingSource, issueAccessKey, payWithSol, samplePreview, sampleProof } from '../../lib/gateway';
 import { formatSol, usdcRawToLamports, useSolPrice } from '../../lib/sol-price';
 import { clearAccessKey, loadAccessKey, saveAccessKey } from '../../lib/access-key-store';
 
@@ -92,6 +92,7 @@ export default function ListingDetailPage() {
   const [queryResult, setQueryResult] = useState<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [proof, setProof] = useState<any>(null);
+  const [sourceInfo, setSourceInfo] = useState<{ bound: boolean; url?: string; updatedAt?: number } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!listingPubkey) return;
@@ -133,8 +134,10 @@ export default function ListingDetailPage() {
 
   useEffect(() => {
     if (!listing) return;
-    samplePreview(listing.pubkey.toBase58(), listing.dataType).then(setPreview).catch(() => setPreview(null));
-    sampleProof(listing.pubkey.toBase58(), listing.dataType).then(setProof).catch(() => setProof(null));
+    const pub = listing.pubkey.toBase58();
+    samplePreview(pub, listing.dataType).then(setPreview).catch(() => setPreview(null));
+    sampleProof(pub, listing.dataType).then(setProof).catch(() => setProof(null));
+    getListingSource(pub).then(setSourceInfo).catch(() => setSourceInfo(null));
   }, [listing]);
 
   const meta = listing ? DATA_TYPE_META[listing.dataType] : null;
@@ -460,6 +463,14 @@ export default function ListingDetailPage() {
                 oracle {relativeTime(listing.qualityUpdatedAt)}
               </span>
             )}
+            {sourceInfo?.bound ? (
+              <span className="chip bg-forest-soft text-forest-dark" title={sourceInfo.url}>
+                <span className="h-1.5 w-1.5 rounded-full bg-forest" />
+                live upstream
+              </span>
+            ) : sourceInfo !== null ? (
+              <span className="chip bg-earth-100 text-ink-muted">demo samples</span>
+            ) : null}
           </div>
           <h1 className="mt-3 font-display text-[32px] md:text-[40px] tracking-ultra leading-tight">
             {listing.title}

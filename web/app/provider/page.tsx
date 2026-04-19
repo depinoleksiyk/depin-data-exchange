@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { SystemProgram, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
+import bs58 from 'bs58';
 import { BN } from '@coral-xyz/anchor';
 import { useAnchorWallet, useConnection, useWallet } from '@solana/wallet-adapter-react';
 
@@ -15,6 +16,11 @@ import {
   type RawListing,
 } from '../lib/chain';
 import { exchangePda, listingPda, providerPda, stakeVaultPda } from '../lib/pdas';
+import {
+  bindListingSource,
+  getListingSource,
+  requestSourceChallenge,
+} from '../lib/gateway';
 import {
   formatUsdc,
   fromUsdcRaw,
@@ -37,7 +43,7 @@ const DATA_TYPE_MAP: Record<DataTypeName, any> = {
 export default function ProviderPage() {
   const { connection } = useConnection();
   const anchorWallet = useAnchorWallet();
-  const { publicKey } = useWallet();
+  const { publicKey, signMessage } = useWallet();
 
   const [provider, setProvider] = useState<Awaited<ReturnType<typeof fetchProvider>>>(null);
   const [exchange, setExchange] = useState<Awaited<ReturnType<typeof fetchExchange>>>(null);
@@ -56,7 +62,16 @@ export default function ProviderPage() {
     type: 'GPS' as DataTypeName,
     ppq: '0.003',
     sub: '5.0',
+    source: '',
+    secret: '',
   });
+  const [sourceDialog, setSourceDialog] = useState<{
+    listing: string;
+    title: string;
+    url: string;
+    secret: string;
+  } | null>(null);
+  const [sourceMap, setSourceMap] = useState<Record<string, { url: string; updatedAt: number } | null>>({});
 
   const refresh = useCallback(async () => {
     if (!publicKey) {
@@ -82,6 +97,31 @@ export default function ProviderPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Pull the off-chain source URL for each of my listings so the table can
+  // show whether it's wired to a real upstream.
+  useEffect(() => {
+    if (myListings.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        myListings.map(async (l) => {
+          const key = l.pubkey.toBase58();
+          try {
+            const info = await getListingSource(key);
+            return [key, info?.bound ? { url: info.url, updatedAt: info.updatedAt } : null] as const;
+          } catch {
+            return [key, null] as const;
+          }
+        })
+      );
+      if (cancelled) return;
+      setSourceMap(Object.fromEntries(entries));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [myListings]);
 
   const handleRegister = useCallback(async () => {
     if (!anchorWallet || !publicKey || !regName.trim()) return;
@@ -189,7 +229,25 @@ export default function ProviderPage() {
         body: `${form.title} is live on-chain.`,
         link: { href: `https://explorer.solana.com/tx/${sig}?cluster=devnet`, label: 'Explorer' },
       });
-      setForm({ ...form, title: '', description: '' });
+
+      // If the provider included a data source URL, bind it now. Failure is
+      // non-fatal — the listing is already live; the user can retry from the
+      // row's "Bind source" action.
+      const sourceUrl = form.source.trim();
+      if (sourceUrl) {
+        try {
+          const listingPubkey = listingPda(publicKey, listingId).toBase58();
+          await handleBindSource(listingPubkey, sourceUrl, form.secret.trim(), form.title);
+        } catch (err: any) {
+          setToast({
+            tone: 'info',
+            title: 'Source binding needs signing',
+            body: 'Listing is live, but bind the upstream later from the table.',
+          });
+        }
+      }
+
+      setForm({ ...form, title: '', description: '', source: '', secret: '' });
       refresh();
     } catch (err: any) {
       setToast({ tone: 'error', title: 'Create listing failed', body: err?.message });
@@ -197,6 +255,47 @@ export default function ProviderPage() {
       setTxBusy(null);
     }
   }, [anchorWallet, connection, publicKey, provider, form, refresh]);
+
+  const handleBindSource = useCallback(async (listingPubkey: string, url: string, secret: string, title: string) => {
+    if (!publicKey || !signMessage) {
+      setToast({ tone: 'error', title: 'Wallet does not support signMessage' });
+      return;
+    }
+    const trimmed = url.trim();
+    if (!trimmed) {
+      setToast({ tone: 'error', title: 'Data source URL required' });
+      return;
+    }
+    setTxBusy('snapshot');
+    try {
+      const challenge = await requestSourceChallenge(listingPubkey);
+      if (challenge.provider !== publicKey.toBase58()) {
+        setToast({ tone: 'error', title: 'Not the listing owner' });
+        return;
+      }
+      const encoded = new TextEncoder().encode(challenge.message);
+      const signed = await signMessage(encoded);
+      const signatureB58 = bs58.encode(signed);
+      await bindListingSource({
+        listing: listingPubkey,
+        url: trimmed,
+        secret: secret.trim() || undefined,
+        nonce: challenge.nonce,
+        signature: signatureB58,
+      });
+      setSourceMap((prev) => ({ ...prev, [listingPubkey]: { url: trimmed, updatedAt: Date.now() } }));
+      setSourceDialog(null);
+      setToast({
+        tone: 'success',
+        title: 'Source bound',
+        body: `${title} will now proxy to ${trimmed.slice(0, 40)}…`,
+      });
+    } catch (err: any) {
+      setToast({ tone: 'error', title: 'Bind failed', body: err?.message?.slice(0, 140) });
+    } finally {
+      setTxBusy(null);
+    }
+  }, [publicKey, signMessage]);
 
   const handleSnapshot = useCallback(async (listing: RawListing) => {
     if (!anchorWallet || !publicKey) return;
@@ -467,6 +566,29 @@ export default function ProviderPage() {
                       className="bg-parchment border border-earth-200 rounded-md px-2 py-2 text-sm focus:border-forest transition-colors"
                     />
                   </div>
+                  <div className="pt-2 border-t border-earth-100 space-y-2">
+                    <div className="text-[11px] uppercase tracking-wide text-ink-soft flex items-center justify-between">
+                      <span>Data source URL</span>
+                      <span className="text-[10px] normal-case tracking-normal">optional · can be added later</span>
+                    </div>
+                    <input
+                      placeholder="https://sensors.example.com/feed"
+                      value={form.source}
+                      onChange={(e) => setForm({ ...form, source: e.target.value })}
+                      className="w-full bg-parchment border border-earth-200 rounded-md px-3 py-2 text-sm focus:border-forest transition-colors font-mono"
+                    />
+                    <input
+                      placeholder="x-depin-secret header (optional)"
+                      value={form.secret}
+                      onChange={(e) => setForm({ ...form, secret: e.target.value })}
+                      className="w-full bg-parchment border border-earth-200 rounded-md px-3 py-2 text-sm focus:border-forest transition-colors font-mono"
+                    />
+                    <p className="text-[11px] text-ink-soft leading-relaxed">
+                      Leave empty and buyers will receive demo samples. Set it and the gateway proxies every
+                      authed query to your endpoint, passing <code className="font-mono">x-depin-buyer</code> and
+                      (if set) <code className="font-mono">x-depin-secret</code>.
+                    </p>
+                  </div>
                   <button
                     onClick={handleCreateListing}
                     disabled={txBusy !== null || provider.stakeAmount < (exchange?.minStakeLamports || 0n)}
@@ -507,19 +629,31 @@ export default function ProviderPage() {
                 <div className="divide-y divide-earth-100">
                   {myListings.map((l, idx) => {
                     const q = qualityLabel(l.qualityScore);
+                    const srcKey = l.pubkey.toBase58();
+                    const src = sourceMap[srcKey];
                     return (
                       <div
-                        key={l.pubkey.toBase58()}
-                        className="grid md:grid-cols-[1.4fr_1fr_1fr_auto] gap-3 items-center p-4 hover:bg-parchment/40 transition-colors animate-fadeUp"
+                        key={srcKey}
+                        className="grid md:grid-cols-[1.6fr_1fr_1fr_auto] gap-3 items-center p-4 hover:bg-parchment/40 transition-colors animate-fadeUp"
                         style={{ animationDelay: `${idx * 60}ms` }}
                       >
-                        <div>
-                          <Link href={`/listing/${l.pubkey.toBase58()}`} className="font-medium hover:text-forest transition-colors">
+                        <div className="min-w-0">
+                          <Link href={`/listing/${srcKey}`} className="font-medium hover:text-forest transition-colors">
                             {l.title}
                           </Link>
-                          <div className="text-[11px] text-ink-soft font-mono mt-0.5">
-                            {shortAddress(l.pubkey.toBase58(), 6)} · id #{l.listingId.toString()}
+                          <div className="text-[11px] text-ink-soft font-mono mt-0.5 truncate">
+                            {shortAddress(srcKey, 6)} · id #{l.listingId.toString()}
                           </div>
+                          {src ? (
+                            <div className="text-[11px] text-forest-dark mt-1 flex items-center gap-1">
+                              <span className="h-1.5 w-1.5 rounded-full bg-forest inline-block" />
+                              <span className="font-mono truncate">live · {src.url.replace(/^https?:\/\//, '')}</span>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-ink-soft mt-1">
+                              no source bound — buyers get demo samples
+                            </div>
+                          )}
                         </div>
                         <div className="text-sm font-mono text-ink-muted tabular">
                           {formatUsdc(fromUsdcRaw(l.priceSubscriptionMonthly))} USDC/mo
@@ -532,13 +666,29 @@ export default function ProviderPage() {
                           </span>{' '}
                           <span className="text-ink-soft text-xs">{q.label}</span>
                         </div>
-                        <button
-                          onClick={() => handleSnapshot(l)}
-                          disabled={txBusy !== null}
-                          className="btn-secondary text-xs"
-                        >
-                          {txBusy === 'snapshot' ? '…' : 'Commit snapshot'}
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() =>
+                              setSourceDialog({
+                                listing: srcKey,
+                                title: l.title,
+                                url: src?.url || '',
+                                secret: '',
+                              })
+                            }
+                            disabled={txBusy !== null}
+                            className="btn-ghost border border-earth-200 text-xs"
+                          >
+                            {src ? 'Edit source' : 'Bind source'}
+                          </button>
+                          <button
+                            onClick={() => handleSnapshot(l)}
+                            disabled={txBusy !== null}
+                            className="btn-secondary text-xs"
+                          >
+                            {txBusy === 'snapshot' ? '…' : 'Snapshot'}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -549,7 +699,93 @@ export default function ProviderPage() {
         </>
       )}
 
+      {sourceDialog && (
+        <SourceDialog
+          dialog={sourceDialog}
+          busy={txBusy === 'snapshot'}
+          onClose={() => setSourceDialog(null)}
+          onSubmit={async () => {
+            await handleBindSource(
+              sourceDialog.listing,
+              sourceDialog.url,
+              sourceDialog.secret,
+              sourceDialog.title
+            );
+          }}
+          onChange={(patch) => setSourceDialog({ ...sourceDialog, ...patch })}
+        />
+      )}
+
       <Toast message={toast} onDismiss={() => setToast(null)} />
+    </div>
+  );
+}
+
+function SourceDialog({
+  dialog,
+  busy,
+  onClose,
+  onSubmit,
+  onChange,
+}: {
+  dialog: { listing: string; title: string; url: string; secret: string };
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+  onChange: (patch: Partial<typeof dialog>) => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center px-4 animate-fadeIn"
+      style={{ background: 'rgba(28, 24, 22, 0.5)' }}
+      onClick={onClose}
+    >
+      <div
+        className="panel w-full max-w-md p-6 animate-fadeUp"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-xs uppercase tracking-[0.16em] text-ink-soft">Data source</div>
+        <h3 className="font-display text-xl mt-1">{dialog.title}</h3>
+        <p className="mt-2 text-[13px] text-ink-muted leading-relaxed">
+          When this is set, every paid query for this listing proxies to your endpoint.
+          Gateway signs <code className="font-mono text-[11px] bg-earth-50 px-1 rounded">x-depin-buyer</code>
+          {' '}and <code className="font-mono text-[11px] bg-earth-50 px-1 rounded">x-depin-listing</code> into the
+          request so you can audit + gate access.
+        </p>
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className="text-[11px] uppercase tracking-wide text-ink-soft">HTTPS URL</label>
+            <input
+              value={dialog.url}
+              onChange={(e) => onChange({ url: e.target.value })}
+              placeholder="https://sensors.example.com/feed"
+              className="w-full mt-1 bg-parchment border border-earth-200 rounded-md px-3 py-2 text-sm font-mono focus:border-forest transition-colors"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] uppercase tracking-wide text-ink-soft">
+              Secret header <span className="normal-case text-ink-soft">(optional)</span>
+            </label>
+            <input
+              value={dialog.secret}
+              onChange={(e) => onChange({ secret: e.target.value })}
+              placeholder="x-depin-secret value"
+              className="w-full mt-1 bg-parchment border border-earth-200 rounded-md px-3 py-2 text-sm font-mono focus:border-forest transition-colors"
+            />
+          </div>
+        </div>
+        <p className="mt-3 text-[11px] text-ink-soft leading-relaxed">
+          You'll be asked to sign a short challenge with your wallet to prove you own the listing.
+        </p>
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="btn-ghost border border-earth-200 text-xs">
+            Cancel
+          </button>
+          <button onClick={onSubmit} disabled={busy} className="btn-primary text-xs">
+            {busy ? 'Signing…' : 'Sign & bind'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

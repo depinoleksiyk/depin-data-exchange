@@ -19,6 +19,7 @@ const {
 } = require('./access-keys');
 const { SubscriptionCache } = require('./sub-cache');
 const paySol = require('./pay-sol');
+const listingSources = require('./listing-sources');
 
 const subscriptionCache = new SubscriptionCache(config.subCacheTtlMs);
 
@@ -241,10 +242,35 @@ app.post('/v1/query/:listingId', async (req, res) => {
     return problem(res, 403, 'listing_mismatch', 'access key is for a different listing');
   }
 
+  db.bumpAccessKeyUsage(auth.keyHash);
+
+  // If the provider has bound a real upstream, proxy the query there.
+  // Otherwise fall back to the baked-in sample set so the marketplace
+  // still feels alive during the devnet preview.
+  const source = listingSources.lookupSource(listingId);
+  if (source) {
+    const upstream = await listingSources.proxyQuery({
+      listingPubkey: listingId,
+      source,
+      dataType,
+      limit,
+      buyer: auth.row.buyer,
+    });
+    return res.status(upstream.ok ? 200 : 502).json({
+      listing: auth.row.listing,
+      source: { url: source.url, upstreamStatus: upstream.status },
+      rows: upstream.rows,
+      upstreamError: upstream.error,
+      deliveredAt: new Date().toISOString(),
+      quota: {
+        used: auth.row.queries_used + 1,
+        limit: auth.row.queries_limit,
+      },
+    });
+  }
+
   const samples = data.samplesFor(dataType);
   const rows = limit && Number.isFinite(+limit) ? samples.rows.slice(0, +limit) : samples.rows;
-
-  db.bumpAccessKeyUsage(auth.keyHash);
 
   res.json({
     listing: auth.row.listing,
@@ -252,11 +278,60 @@ app.post('/v1/query/:listingId', async (req, res) => {
     rows,
     count: rows.length,
     deliveredAt: new Date().toISOString(),
+    fallback: 'mock-samples',
     quota: {
       used: auth.row.queries_used + 1,
       limit: auth.row.queries_limit,
     },
   });
+});
+
+// --- listing source registration ----------------------------------------
+
+// GET /v1/listings/:id/source — public lookup so buyers see where data
+// actually comes from (just the URL + updated-at, never the secret).
+app.get('/v1/listings/:id/source', (req, res) => {
+  const row = listingSources.lookupSource(req.params.id);
+  if (!row) return res.json({ bound: false });
+  return res.json({
+    bound: true,
+    listing: row.listing,
+    provider: row.provider,
+    url: row.url,
+    updatedAt: row.updated_at,
+  });
+});
+
+// POST /v1/listings/:id/challenge — mint a short-lived nonce the provider
+// signs with their wallet key before hitting PUT.
+app.post('/v1/listings/:id/challenge', async (req, res) => {
+  try {
+    const ch = await listingSources.createChallenge(req.params.id);
+    return res.json(ch);
+  } catch (err) {
+    return problem(res, err?.status || 500, 'challenge_failed', err.message || 'unknown');
+  }
+});
+
+// PUT /v1/listings/:id/source — bind a URL to the listing. Requires the
+// signed challenge plus a matching on-chain provider.
+app.put('/v1/listings/:id/source', async (req, res) => {
+  const { url, secret, nonce, signature } = req.body || {};
+  if (!url || !nonce || !signature) {
+    return problem(res, 400, 'invalid_body', 'url, nonce, signature required');
+  }
+  try {
+    const result = await listingSources.bindSource({
+      listingPubkey: req.params.id,
+      url,
+      secret,
+      nonce,
+      signatureBase58: signature,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return problem(res, err?.status || 500, 'bind_failed', err.message || 'unknown');
+  }
 });
 
 // Pay-per-query path: buyer submits a query_data tx, we verify event + deliver.
@@ -489,6 +564,10 @@ setInterval(() => {
   );
   if (confirmed > 0 || pending > 0) {
     logger.debug({ confirmed, pending }, 'replay-store swept');
+  }
+  const expiredChallenges = listingSources.sweepExpiredChallenges();
+  if (expiredChallenges > 0) {
+    logger.debug({ expiredChallenges }, 'challenge sweep');
   }
 }, 60 * 60 * 1000).unref();
 
