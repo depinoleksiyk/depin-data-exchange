@@ -1,206 +1,157 @@
 """
 Data Quality Oracle — DePIN Data Exchange
 
-Validates data freshness, accuracy, and completeness.
-Assigns quality scores to data listings.
-
-Run: python quality_oracle.py
+Scoring logic: freshness / accuracy / completeness per-record, plus an overall
+weighted score. Used by the oracle daemon to push `update_quality` to the
+Solana program, and available as a library for other tooling.
 """
 
-import time
-import logging
 from dataclasses import dataclass
+import time
+from typing import Iterable
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-log = logging.getLogger("quality_oracle")
-
-MAX_STALENESS_SECONDS = 3600  # data older than 1h gets penalty
+MAX_STALENESS_SECONDS = 3600
 MIN_GPS_ACCURACY_METERS = 10.0
 MIN_RECORDS_FOR_SCORE = 5
 
 
 @dataclass
 class QualityReport:
-    dataType: str
-    freshnessScore: float    # 0-100
-    accuracyScore: float     # 0-100
-    completenessScore: float  # 0-100
-    overallScore: float      # weighted average 0-100
+    data_type: str
+    freshness: int       # 0-100
+    accuracy: int        # 0-100
+    completeness: int    # 0-100
+    overall: int         # 0-100
     issues: list
 
 
-def score_gps_data(records: list[dict]) -> QualityReport:
-    """Score GPS data stream quality."""
-    issues = []
-    now = time.time() * 1000  # ms
+def _ts_of(record: dict) -> int:
+    # support both new ("ts") and legacy ("timestamp") layouts
+    return int(record.get("ts") or record.get("timestamp") or 0)
 
-    # Freshness: how recent is the latest record
-    timestamps = [r.get("timestamp", 0) for r in records]
-    latestTs = max(timestamps) if timestamps else 0
-    ageSec = (now - latestTs) / 1000
 
-    if ageSec > MAX_STALENESS_SECONDS:
-        freshnessScore = max(0, 100 - (ageSec / 36))  # lose 1pt per 36s after threshold
-        issues.append(f"Latest record is {ageSec:.0f}s old")
-    else:
-        freshnessScore = 100.0
+def _age_seconds(records: Iterable[dict]) -> float:
+    now_ms = time.time() * 1000
+    latest = max((_ts_of(r) for r in records), default=0)
+    return max(0.0, (now_ms - latest) / 1000.0)
 
-    # Accuracy: GPS accuracy field
-    accuracies = [r.get("accuracy", 999) for r in records]
-    avgAccuracy = sum(accuracies) / len(accuracies) if accuracies else 999
 
-    if avgAccuracy <= 2:
-        accuracyScore = 100.0
-    elif avgAccuracy <= MIN_GPS_ACCURACY_METERS:
-        accuracyScore = 100 - ((avgAccuracy - 2) / 8 * 30)
-    else:
-        accuracyScore = max(0, 70 - (avgAccuracy - 10) * 5)
-        issues.append(f"Average GPS accuracy {avgAccuracy:.1f}m exceeds threshold")
+def _freshness(records: Iterable[dict]) -> float:
+    age = _age_seconds(records)
+    if age <= MAX_STALENESS_SECONDS:
+        return 100.0
+    return max(0.0, 100.0 - (age - MAX_STALENESS_SECONDS) / 36.0)
 
-    # Completeness: required fields present
-    requiredFields = {"lat", "lng", "timestamp", "source"}
-    missingCount = 0
-    for r in records:
-        missing = requiredFields - set(r.keys())
-        if missing:
-            missingCount += 1
-            issues.append(f"Record missing fields: {missing}")
 
-    completenessScore = 100 * (1 - missingCount / max(len(records), 1))
-
+def _completeness(records: list[dict], required: set[str]) -> float:
+    if not records:
+        return 0.0
+    missing = sum(1 for r in records if required - set(r.keys()))
+    ratio = 1 - missing / len(records)
+    score = 100.0 * ratio
     if len(records) < MIN_RECORDS_FOR_SCORE:
-        completenessScore *= 0.7
-        issues.append(f"Only {len(records)} records (min {MIN_RECORDS_FOR_SCORE} for full score)")
-
-    overallScore = freshnessScore * 0.3 + accuracyScore * 0.4 + completenessScore * 0.3
-
-    return QualityReport(
-        dataType="GPS",
-        freshnessScore=round(freshnessScore, 1),
-        accuracyScore=round(accuracyScore, 1),
-        completenessScore=round(completenessScore, 1),
-        overallScore=round(overallScore, 1),
-        issues=issues,
-    )
+        score *= 0.7
+    return max(0.0, score)
 
 
-def score_weather_data(records: list[dict]) -> QualityReport:
-    """Score weather data stream quality."""
+def score_gps(records: list[dict]) -> QualityReport:
     issues = []
-    now = time.time() * 1000
+    accuracies = [float(r.get("accuracy", 999)) for r in records]
+    avg_accuracy = sum(accuracies) / len(accuracies) if accuracies else 999.0
 
-    timestamps = [r.get("timestamp", 0) for r in records]
-    latestTs = max(timestamps) if timestamps else 0
-    ageSec = (now - latestTs) / 1000
-    freshnessScore = max(0, 100 - max(0, ageSec - MAX_STALENESS_SECONDS) / 36)
+    if avg_accuracy <= 2:
+        accuracy = 100.0
+    elif avg_accuracy <= MIN_GPS_ACCURACY_METERS:
+        accuracy = 100 - (avg_accuracy - 2) / 8 * 30
+    else:
+        accuracy = max(0.0, 70 - (avg_accuracy - 10) * 5)
+        issues.append(f"avg GPS accuracy {avg_accuracy:.1f}m above 10m threshold")
 
-    # Accuracy: check for reasonable ranges
-    accuracyScore = 100.0
+    freshness = _freshness(records)
+    completeness = _completeness(records, {"lat", "lng"})
+    overall = freshness * 0.3 + accuracy * 0.4 + completeness * 0.3
+    return QualityReport("GPS", int(freshness), int(accuracy), int(completeness), int(overall), issues)
+
+
+def score_weather(records: list[dict]) -> QualityReport:
+    issues = []
+    accuracy = 100.0
     for r in records:
-        temp = r.get("temp", None)
+        temp = r.get("temperature_c", r.get("temp"))
         if temp is not None and (temp < -60 or temp > 60):
-            accuracyScore -= 20
-            issues.append(f"Suspicious temperature: {temp}°C")
-        humidity = r.get("humidity", None)
+            accuracy -= 20
+            issues.append(f"suspicious temperature {temp}")
+        humidity = r.get("humidity_pct", r.get("humidity"))
         if humidity is not None and (humidity < 0 or humidity > 100):
-            accuracyScore -= 20
-            issues.append(f"Invalid humidity: {humidity}%")
-
-    accuracyScore = max(0, accuracyScore)
-
-    requiredFields = {"temp", "humidity", "pressure", "timestamp", "station"}
-    missingCount = sum(1 for r in records if requiredFields - set(r.keys()))
-    completenessScore = 100 * (1 - missingCount / max(len(records), 1))
-
-    overallScore = freshnessScore * 0.3 + accuracyScore * 0.4 + completenessScore * 0.3
-
-    return QualityReport(
-        dataType="Weather",
-        freshnessScore=round(freshnessScore, 1),
-        accuracyScore=round(accuracyScore, 1),
-        completenessScore=round(completenessScore, 1),
-        overallScore=round(overallScore, 1),
-        issues=issues,
+            accuracy -= 20
+            issues.append(f"invalid humidity {humidity}")
+    accuracy = max(0.0, accuracy)
+    freshness = _freshness(records)
+    completeness = _completeness(
+        records,
+        {"temperature_c", "humidity_pct"} if records and "temperature_c" in records[0] else {"temp", "humidity"},
     )
+    overall = freshness * 0.3 + accuracy * 0.4 + completeness * 0.3
+    return QualityReport("Weather", int(freshness), int(accuracy), int(completeness), int(overall), issues)
 
 
-def score_network_data(records: list[dict]) -> QualityReport:
-    """Score network telemetry data quality."""
+def score_network(records: list[dict]) -> QualityReport:
     issues = []
-    now = time.time() * 1000
-
-    timestamps = [r.get("timestamp", 0) for r in records]
-    latestTs = max(timestamps) if timestamps else 0
-    ageSec = (now - latestTs) / 1000
-    freshnessScore = max(0, 100 - max(0, ageSec - MAX_STALENESS_SECONDS) / 36)
-
-    accuracyScore = 100.0
+    accuracy = 100.0
     for r in records:
-        uptime = r.get("uptime", 0)
+        uptime = r.get("uptime_pct", r.get("uptime", 0))
         if uptime < 0 or uptime > 100:
-            accuracyScore -= 25
-            issues.append(f"Invalid uptime: {uptime}%")
+            accuracy -= 25
+            issues.append(f"invalid uptime {uptime}")
         latency = r.get("latency_ms", 0)
         if latency < 0 or latency > 10000:
-            accuracyScore -= 15
-            issues.append(f"Suspicious latency: {latency}ms")
-
-    accuracyScore = max(0, accuracyScore)
-
-    requiredFields = {"uptime", "latency_ms", "bandwidth_mbps", "timestamp", "node"}
-    missingCount = sum(1 for r in records if requiredFields - set(r.keys()))
-    completenessScore = 100 * (1 - missingCount / max(len(records), 1))
-
-    overallScore = freshnessScore * 0.3 + accuracyScore * 0.4 + completenessScore * 0.3
-
-    return QualityReport(
-        dataType="Network",
-        freshnessScore=round(freshnessScore, 1),
-        accuracyScore=round(accuracyScore, 1),
-        completenessScore=round(completenessScore, 1),
-        overallScore=round(overallScore, 1),
-        issues=issues,
+            accuracy -= 15
+            issues.append(f"suspicious latency {latency}ms")
+    accuracy = max(0.0, accuracy)
+    freshness = _freshness(records)
+    completeness = _completeness(
+        records,
+        {"uptime_pct", "latency_ms"} if records and "uptime_pct" in records[0] else {"uptime", "latency_ms"},
     )
+    overall = freshness * 0.3 + accuracy * 0.4 + completeness * 0.3
+    return QualityReport("Network", int(freshness), int(accuracy), int(completeness), int(overall), issues)
+
+
+def score_camera(records: list[dict]) -> QualityReport:
+    issues = []
+    freshness = _freshness(records)
+    required = {"device", "frame", "resolution"}
+    completeness = _completeness(records, required)
+    # Accuracy here is a proxy for coverage distance sanity.
+    distances = [float(r.get("coverage_km", 0)) for r in records]
+    if distances and any(d < 0 or d > 10 for d in distances):
+        accuracy = 60.0
+        issues.append("coverage_km out of sane range")
+    else:
+        accuracy = 92.0
+    overall = freshness * 0.3 + accuracy * 0.4 + completeness * 0.3
+    return QualityReport("Camera", int(freshness), int(accuracy), int(completeness), int(overall), issues)
 
 
 SCORERS = {
-    "GPS": score_gps_data,
-    "Weather": score_weather_data,
-    "Network": score_network_data,
+    "GPS": score_gps,
+    "Weather": score_weather,
+    "Network": score_network,
+    "Camera": score_camera,
 }
 
 
-def score_data(dataType: str, records: list[dict]) -> QualityReport:
-    """Score data quality based on type."""
-    scorer = SCORERS.get(dataType)
+def score(data_type: str, records: list[dict]) -> QualityReport:
+    scorer = SCORERS.get(data_type)
     if scorer is None:
-        return QualityReport(
-            dataType=dataType,
-            freshnessScore=0,
-            accuracyScore=0,
-            completenessScore=0,
-            overallScore=0,
-            issues=[f"Unknown data type: {dataType}"],
-        )
+        return QualityReport(data_type, 0, 0, 0, 0, [f"unknown data type {data_type}"])
     return scorer(records)
 
 
 if __name__ == "__main__":
-    # Demo scoring with sample data
-    gps_sample = [
-        {"lat": 37.7749, "lng": -122.4194, "timestamp": time.time() * 1000, "accuracy": 3.2, "source": "test"},
-        {"lat": 37.7751, "lng": -122.4183, "timestamp": time.time() * 1000 - 60000, "accuracy": 2.8, "source": "test"},
+    demo = [
+        {"lat": 37.7749, "lng": -122.4194, "accuracy": 3.2, "ts": int(time.time() * 1000)},
+        {"lat": 37.7751, "lng": -122.4183, "accuracy": 2.8, "ts": int(time.time() * 1000) - 60_000},
     ]
-
-    report = score_gps_data(gps_sample)
-    print(f"\nQuality Report: {report.dataType}")
-    print(f"  Freshness:    {report.freshnessScore}/100")
-    print(f"  Accuracy:     {report.accuracyScore}/100")
-    print(f"  Completeness: {report.completenessScore}/100")
-    print(f"  Overall:      {report.overallScore}/100")
-    if report.issues:
-        print(f"  Issues: {', '.join(report.issues)}")
+    report = score("GPS", demo)
+    print(report)
