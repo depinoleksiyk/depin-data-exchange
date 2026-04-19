@@ -3,8 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
+import {
+  TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
+  createMintToInstruction,
+  getAssociatedTokenAddressSync,
+} from '@solana/spl-token';
 import { useAnchorWallet, useConnection, useWallet } from '@solana/wallet-adapter-react';
 
 import {
@@ -38,7 +43,8 @@ import { StatTile } from '../../components/StatTile';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import { Reveal } from '../../components/Reveal';
 import { CountUp } from '../../components/CountUp';
-import { authedQuery, issueAccessKey, samplePreview, sampleProof } from '../../lib/gateway';
+import { authedQuery, issueAccessKey, payWithSol, samplePreview, sampleProof } from '../../lib/gateway';
+import { formatSol, usdcRawToLamports, useSolPrice } from '../../lib/sol-price';
 
 const MONTH_OPTIONS = [1, 3, 6, 12];
 
@@ -65,8 +71,9 @@ export default function ListingDetailPage() {
   const [notFound, setNotFound] = useState(false);
 
   const [months, setMonths] = useState<number>(1);
-  const [txBusy, setTxBusy] = useState<null | 'subscribe' | 'issueKey' | 'query'>(null);
+  const [txBusy, setTxBusy] = useState<null | 'subscribe' | 'subscribeSol' | 'issueKey' | 'query'>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const { price: solPrice, refresh: refreshSolPrice } = useSolPrice();
 
   const [accessKey, setAccessKey] = useState<string | null>(null);
   const [queryType, setQueryType] = useState<string>('gps');
@@ -200,6 +207,116 @@ export default function ListingDetailPage() {
       setTxBusy(null);
     }
   }, [anchorWallet, listing, publicKey, connection, months, refresh]);
+
+  const solQuote = useMemo(() => {
+    if (!listing || !exchange || !solPrice) return null;
+    const totalUsdc = listing.priceSubscriptionMonthly * BigInt(months);
+    const lamports = usdcRawToLamports(totalUsdc, solPrice.usd, 100);
+    return { totalUsdc, lamports, solPriceUsd: solPrice.usd, slippageBps: 100, updatedAt: solPrice.updatedAt, source: solPrice.source };
+  }, [listing, exchange, solPrice, months]);
+
+  const handleSubscribeWithSol = useCallback(async () => {
+    if (!anchorWallet || !listing || !publicKey || !solQuote) return;
+    setTxBusy('subscribeSol');
+    try {
+      // Provider ATA must exist — commission goes to treasury ATA which is
+      // also known fixed.
+      const providerAta = getAssociatedTokenAddressSync(USDC_MINT, listing.provider);
+      const providerAtaInfo = await connection.getAccountInfo(providerAta);
+      if (!providerAtaInfo) {
+        setToast({
+          tone: 'error',
+          title: 'Provider has no USDC account yet',
+          body: 'The provider needs to create their USDC associated token account before they can be paid.',
+        });
+        return;
+      }
+
+      // Build the composite tx. Gateway will sanity-check every ix then add
+      // its mint-authority signature before submitting.
+      const program = marketplaceClient(connection, anchorWallet as any);
+      const buyerAta = getAssociatedTokenAddressSync(USDC_MINT, publicKey);
+      const buyerAtaInfo = await connection.getAccountInfo(buyerAta);
+      const ixs: TransactionInstruction[] = [];
+
+      if (!buyerAtaInfo) {
+        ixs.push(
+          createAssociatedTokenAccountInstruction(publicKey, buyerAta, publicKey, USDC_MINT)
+        );
+      }
+
+      ixs.push(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: EXCHANGE_AUTHORITY,
+          lamports: Number(solQuote.lamports),
+        })
+      );
+      ixs.push(
+        createMintToInstruction(
+          USDC_MINT,
+          buyerAta,
+          EXCHANGE_AUTHORITY,
+          Number(solQuote.totalUsdc)
+        )
+      );
+
+      const subscribeIx = await (program.methods as any)
+        .subscribe(months)
+        .accountsPartial({
+          exchange: exchangePda(),
+          listing: listing.pubkey,
+          subscription: subscriptionPda(listing.pubkey, publicKey),
+          buyerUsdc: buyerAta,
+          providerUsdc: providerAta,
+          treasuryUsdc: TREASURY_ATA,
+          provider: providerPda(listing.provider),
+          buyer: publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction();
+      ixs.push(subscribeIx);
+
+      const tx = new Transaction();
+      tx.add(...ixs);
+      tx.feePayer = publicKey;
+      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+
+      // Buyer signs first; gateway's partialSign fills in the mint authority
+      // slot. requireAllSignatures:false keeps serialize happy while the
+      // authority signature is still missing.
+      const signed = await anchorWallet.signTransaction(tx);
+      const serialized = signed.serialize({ requireAllSignatures: false }).toString('base64');
+
+      const ack = await payWithSol({
+        serializedTx: serialized,
+        listing: listing.pubkey.toBase58(),
+        buyer: publicKey.toBase58(),
+        durationMonths: months,
+        solLamports: solQuote.lamports.toString(),
+        solPriceUsd: solQuote.solPriceUsd,
+        slippageBps: solQuote.slippageBps,
+      });
+
+      setToast({
+        tone: 'success',
+        title: 'Paid in SOL',
+        body: `${formatSol(solQuote.lamports)} SOL ≈ ${formatUsdc(fromUsdcRaw(solQuote.totalUsdc))} USDC at $${solQuote.solPriceUsd.toFixed(2)}/SOL.`,
+        link: { href: `https://explorer.solana.com/tx/${ack.signature}?cluster=devnet`, label: 'View on Explorer' },
+      });
+      refresh();
+    } catch (err: any) {
+      console.error(err);
+      setToast({
+        tone: 'error',
+        title: 'SOL payment failed',
+        body: err?.message?.slice(0, 140) || 'Unknown error',
+      });
+    } finally {
+      setTxBusy(null);
+    }
+  }, [anchorWallet, listing, publicKey, connection, months, solQuote, refresh]);
 
   const handleIssueKey = useCallback(async () => {
     if (!anchorWallet || !listing || !publicKey || !subscription) return;
@@ -564,8 +681,44 @@ export default function ListingDetailPage() {
                     {txBusy === 'subscribe' ? 'Signing…' : <>Pay & subscribe for {months}mo <span className="arrow">→</span></>}
                   </button>
 
+                  {/* Pay-with-SOL alternative — gateway co-signs a tx that
+                      bundles SystemTransfer(SOL) + MintTo(USDC) + subscribe,
+                      so the buyer never needs to hold mock USDC. */}
+                  <div className="relative mt-4 border-t border-earth-100 pt-4">
+                    <div className="flex items-center justify-between text-[11px] text-ink-soft">
+                      <span className="uppercase tracking-wide">Pay in SOL</span>
+                      <button
+                        type="button"
+                        onClick={refreshSolPrice}
+                        className="font-mono hover:text-ink transition-colors"
+                        title="Refresh SOL/USD"
+                      >
+                        {solPrice ? `$${solPrice.usd.toFixed(2)}` : '…'} / SOL
+                        {solPrice?.source === 'fallback' && <span className="ml-1 text-clay">stale</span>}
+                      </button>
+                    </div>
+                    {solQuote ? (
+                      <div className="mt-1 flex items-baseline justify-between mono text-[12px]">
+                        <span className="text-ink tabular">{formatSol(solQuote.lamports)} SOL</span>
+                        <span className="text-ink-soft">≈ {formatUsdc(fromUsdcRaw(solQuote.totalUsdc))} USDC</span>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-[12px] text-ink-soft">fetching live quote…</div>
+                    )}
+                    <button
+                      onClick={handleSubscribeWithSol}
+                      disabled={txBusy !== null || !solQuote}
+                      className="btn-secondary w-full mt-3 justify-center"
+                    >
+                      {txBusy === 'subscribeSol' ? 'Paying in SOL…' : <>Pay {solQuote ? `${formatSol(solQuote.lamports, 4)} SOL` : '…'} <span className="arrow">◎</span></>}
+                    </button>
+                    <p className="mt-2 text-[10.5px] text-ink-soft leading-relaxed">
+                      One click: signs a bundle of SOL transfer + USDC mint-to + subscribe. Rate from CoinGecko, 1% slippage buffer, gateway co-signs the mint step.
+                    </p>
+                  </div>
+
                   <p className="relative mt-3 text-[11px] text-ink-soft leading-relaxed">
-                    Need devnet USDC? Ask the exchange authority (
+                    Prefer USDC? Ask the exchange authority (
                     <a
                       className="link-plain"
                       href={`https://explorer.solana.com/address/${EXCHANGE_AUTHORITY.toBase58()}?cluster=devnet`}

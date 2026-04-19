@@ -18,6 +18,7 @@ const {
   toHex,
 } = require('./access-keys');
 const { SubscriptionCache } = require('./sub-cache');
+const paySol = require('./pay-sol');
 
 const subscriptionCache = new SubscriptionCache(config.subCacheTtlMs);
 
@@ -304,6 +305,35 @@ app.post('/v1/query-tx/:listingId', async (req, res) => {
   } catch (err) {
     db.releaseTx(txSignature);
     throw err;
+  }
+});
+
+// Co-sign a "pay with SOL" transaction: buyer pays SOL, gateway mints
+// matching USDC into their ATA, subscribe runs as usual. Only signs txs
+// whose shape matches the expected three-instruction template.
+app.post('/v1/pay-with-sol', async (req, res) => {
+  if (!config.mintAuthorityKeypairPath) {
+    return problem(res, 503, 'sol_payment_disabled', 'gateway has no mint authority configured');
+  }
+  const { serializedTx, listing, buyer, durationMonths, solLamports, solPriceUsd, slippageBps } = req.body || {};
+  if (!serializedTx || !listing || !buyer || !durationMonths || !solLamports || !solPriceUsd) {
+    return problem(res, 400, 'invalid_body', 'missing fields');
+  }
+  try {
+    const { sig } = await paySol.coSignAndSubmit({
+      serializedTx,
+      listingPubkey: listing,
+      buyer,
+      durationMonths: Number(durationMonths),
+      solLamports: String(solLamports),
+      solPriceUsd: Number(solPriceUsd),
+      slippageBps: Number(slippageBps ?? 100),
+    });
+    return res.json({ ok: true, signature: sig });
+  } catch (err) {
+    const status = err?.status || 500;
+    const code = status === 422 ? 'tx_shape_rejected' : 'pay_sol_failed';
+    return problem(res, status, code, err.message || 'unknown error');
   }
 });
 

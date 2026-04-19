@@ -36,6 +36,12 @@ const config = {
   // TTL for the subscription-verify cache. Lower = fresher, higher = cheaper
   // on RPC; revoke events invalidate immediately via WS regardless.
   subCacheTtlMs: intEnv('GATEWAY_SUB_CACHE_TTL_MS', 7_000),
+
+  // Mint authority for mock USDC. Gateway co-signs pay-with-SOL transactions
+  // with this keypair so SOL-native buyers can subscribe without holding
+  // USDC. Leave unset to disable the endpoint entirely.
+  mintAuthorityKeypairPath: process.env.GATEWAY_MINT_AUTHORITY_KEYPAIR_PATH || '',
+  usdcMint: process.env.USDC_MINT || 'HaSyCU2nb7ffrfepbDccqB2Q2oGin9V9YkFjjAcdpQXd',
 };
 
 module.exports = config;

@@ -66,6 +66,25 @@ export async function authedQuery(
   return body;
 }
 
+export async function payWithSol(params: {
+  serializedTx: string;
+  listing: string;
+  buyer: string;
+  durationMonths: number;
+  solLamports: string;
+  solPriceUsd: number;
+  slippageBps?: number;
+}) {
+  const r = await fetch(`${baseUrl()}/v1/pay-with-sol`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body?.message || body?.error || `pay-with-sol failed: ${r.status}`);
+  return body;
+}
+
 export async function payPerQuery(listing: string, txSignature: string, dataType: string, limit = 5) {
   const r = await fetch(`${baseUrl()}/v1/query-tx/${listing}`, {
     method: 'POST',
