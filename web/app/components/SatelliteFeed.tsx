@@ -60,7 +60,7 @@ const TONE_CHIP: Record<Entry['tone'], string> = {
   ink: 'bg-earth-100 text-ink',
 };
 
-export function LiveFeed() {
+export function SatelliteFeed() {
   const [entries, setEntries] = useState<Entry[]>(SEED);
   const [live, setLive] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -105,7 +105,7 @@ export function LiveFeed() {
             // them so broken event formats are noticed in dev and
             // anomalous floods stand out in prod logs.
             if (typeof console !== 'undefined') {
-              console.warn('[LiveFeed] dropped non-JSON frame', err);
+              console.warn('[SatelliteFeed] dropped non-JSON frame', err);
             }
           }
         };
