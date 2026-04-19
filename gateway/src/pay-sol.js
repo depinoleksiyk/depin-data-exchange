@@ -30,6 +30,7 @@ const {
 const config = require('./config');
 const chain = require('./chain');
 const logger = require('./logger');
+const solPrice = require('./sol-price');
 
 const SLIPPAGE_BPS_MAX = 300; // cap the slippage buyers can claim to 3 %
 
@@ -179,8 +180,12 @@ async function coSignAndSubmit({
   }
 
   // Verify declared SOL amount matches the USDC the buyer is trying to unlock
-  // within the declared slippage tolerance.
-  const expectedLamportsNoSlip = Number(expectedUsdc) * 1_000 / solPriceUsd;
+  // within the declared slippage tolerance. The price is fetched server-side
+  // from a trusted oracle — client's solPriceUsd is only used as a sanity
+  // check (it must agree with the oracle within the deviation tolerance).
+  const trustedSolUsd = await solPrice.getTrustedSolUsd();
+  solPrice.assertClientPriceAgrees(solPriceUsd, trustedSolUsd);
+  const expectedLamportsNoSlip = Number(expectedUsdc) * 1_000 / trustedSolUsd;
   const minLamports = Math.floor(expectedLamportsNoSlip * (1 - slippageBps / 10_000));
   const maxLamports = Math.ceil(expectedLamportsNoSlip * (1 + slippageBps / 10_000));
   const lamportsNum = Number(solLamports);
