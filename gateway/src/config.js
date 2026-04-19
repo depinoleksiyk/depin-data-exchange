@@ -24,6 +24,8 @@ const config = {
   dbPath: process.env.GATEWAY_DB_PATH || path.join(__dirname, '../data/gateway.sqlite'),
   bodyLimit: process.env.GATEWAY_BODY_LIMIT || '64kb',
   corsOrigins: listEnv('GATEWAY_CORS_ORIGINS'),
+  // Explicit opt-in for accept-any-origin (dev convenience). Default: false.
+  corsAllowAll: (process.env.GATEWAY_CORS_ALLOW_ALL || '').toLowerCase() === 'true',
   rateLimit: {
     windowMs: intEnv('GATEWAY_RATE_WINDOW_MS', 60_000),
     max: intEnv('GATEWAY_RATE_MAX', 60),

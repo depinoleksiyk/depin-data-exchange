@@ -36,7 +36,13 @@ app.use(
 const corsOptions = {
   origin(origin, cb) {
     if (!origin) return cb(null, true); // curl / server-side
-    if (config.corsOrigins.length === 0) return cb(null, true); // dev = wildcard
+    // Explicit opt-in for wildcard dev mode — empty allowlist no longer
+    // means "accept everything." Missing config = reject cross-origin.
+    if (config.corsAllowAll) return cb(null, true);
+    if (config.corsOrigins.length === 0) {
+      logger.warn({ origin }, 'cors: no allowlist configured, rejecting');
+      return cb(null, false);
+    }
     cb(null, config.corsOrigins.includes(origin));
   },
   credentials: false,
