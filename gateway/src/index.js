@@ -17,6 +17,9 @@ const {
   constantTimeEqual,
   toHex,
 } = require('./access-keys');
+const { SubscriptionCache } = require('./sub-cache');
+
+const subscriptionCache = new SubscriptionCache(config.subCacheTtlMs);
 
 const app = express();
 
@@ -90,9 +93,13 @@ async function authenticateAccessKey(req) {
   if (row.exp_at < now) return { ok: false, reason: 'expired' };
   if (row.queries_used >= row.queries_limit) return { ok: false, reason: 'quota_exhausted' };
 
-  // Re-verify on-chain on every request — guards against revoked or renewed subs.
+  // Re-verify on-chain, but cache briefly so bursts of queries collapse onto
+  // one RPC round-trip. Revocations are still visible within the TTL (and
+  // immediately if the AccessKeyRevoked event arrives over our WS feed).
   const subPubkey = new PublicKey(row.subscription);
-  const sub = await chain.fetchSubscription(subPubkey);
+  const sub = await subscriptionCache.get(subPubkey, () =>
+    chain.fetchSubscription(subPubkey)
+  );
   if (!sub) return { ok: false, reason: 'subscription_gone' };
   if (!sub.accessKeyActive) return { ok: false, reason: 'access_key_revoked' };
   if (!constantTimeEqual(keyHash, Buffer.from(sub.accessKeyHash))) {
@@ -414,9 +421,17 @@ async function wireProgramStream() {
         }
       }
       broadcast({ type: 'event', name: event.name, data: safeData, signature: event.signature });
-      if (event.name === 'AccessKeyRevoked' && event.data?.subscription) {
+      const subPubkey = event.data?.subscription;
+      if (subPubkey) {
         try {
-          db.revokeSubscription(event.data.subscription.toBase58());
+          subscriptionCache.invalidate(subPubkey);
+        } catch (err) {
+          logger.debug({ err: err.message }, 'cache invalidate failed');
+        }
+      }
+      if (event.name === 'AccessKeyRevoked' && subPubkey) {
+        try {
+          db.revokeSubscription(subPubkey.toBase58());
         } catch (err) {
           logger.debug({ err: err.message }, 'revoke handler failed');
         }

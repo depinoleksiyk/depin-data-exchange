@@ -33,6 +33,9 @@ const config = {
   },
   replayTtlSec: intEnv('GATEWAY_REPLAY_TTL_SEC', 30 * 24 * 3600), // 30 days
   accessKeyTtlSec: intEnv('GATEWAY_ACCESS_KEY_TTL_SEC', 24 * 3600),
+  // TTL for the subscription-verify cache. Lower = fresher, higher = cheaper
+  // on RPC; revoke events invalidate immediately via WS regardless.
+  subCacheTtlMs: intEnv('GATEWAY_SUB_CACHE_TTL_MS', 7_000),
 };
 
 module.exports = config;
