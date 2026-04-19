@@ -16,6 +16,7 @@ const {
   PublicKey,
   Transaction,
   SystemProgram,
+  ComputeBudgetProgram,
 } = require('@solana/web3.js');
 const {
   TOKEN_PROGRAM_ID,
@@ -113,14 +114,29 @@ async function coSignAndSubmit({
   const expectedUsdc = BigInt(listing.priceSubscriptionMonthly.toString()) * BigInt(durationMonths);
 
   // --- tighten the tx shape -------------------------------------------
-  if (tx.instructions.length < 2 || tx.instructions.length > 4) {
-    const e = new Error(`unexpected_ix_count: ${tx.instructions.length}`);
+
+  // Walk past any leading ComputeBudget ixs — Phantom and most modern
+  // wallets auto-prepend setComputeUnitLimit / setComputeUnitPrice before
+  // the user's ixs run, so the payload the gateway sees often has 5 or 6
+  // instructions even though the "real" ones are 3.
+  let cursor = 0;
+  while (
+    cursor < tx.instructions.length &&
+    tx.instructions[cursor].programId.equals(ComputeBudgetProgram.programId)
+  ) {
+    cursor += 1;
+  }
+
+  // After skipping compute-budget, we need 3 or 4 ixs: optional createATA,
+  // mandatory SystemTransfer + MintTo + subscribe.
+  const remaining = tx.instructions.length - cursor;
+  if (remaining < 3 || remaining > 4) {
+    const e = new Error(`unexpected_ix_count: ${tx.instructions.length} (core=${remaining})`);
     e.status = 422;
     throw e;
   }
 
-  // first ix may be createAssociatedTokenAccount; detect and skip.
-  let cursor = 0;
+  // first post-compute ix may be createAssociatedTokenAccount; detect and skip.
   if (tx.instructions[cursor].programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)) {
     cursor += 1;
   }
