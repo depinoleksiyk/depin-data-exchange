@@ -13,8 +13,13 @@ const REFRESH_MS = 30_000;
 type SolPrice = {
   usd: number;
   updatedAt: number; // ms
-  source: 'coingecko' | 'fallback';
+  source: 'coingecko' | 'stale';
 };
+
+// Once the cached price is older than this, we treat it as unusable for
+// pay-with-SOL and force the UI into an error state instead of quoting a
+// stale rate.
+const HARD_MAX_AGE_MS = 10 * 60_000;
 
 let cached: SolPrice | null = null;
 let inflight: Promise<SolPrice | null> | null = null;
@@ -36,10 +41,13 @@ async function fetchPrice(): Promise<SolPrice | null> {
       cached = next;
       return next;
     } catch {
-      // Fallback to last good value if we had one, otherwise a devnet-safe
-      // placeholder. Users see the "stale" badge in the UI either way.
-      if (cached) return { ...cached, source: 'fallback' };
-      return { usd: 150, updatedAt: Date.now(), source: 'fallback' };
+      // Surface a stale quote only if the last known value is still fresh
+      // enough to be useful. Beyond the hard max age we return null so the
+      // UI disables pay-with-SOL rather than quoting an invented rate.
+      if (cached && Date.now() - cached.updatedAt < HARD_MAX_AGE_MS) {
+        return { ...cached, source: 'stale' };
+      }
+      return null;
     } finally {
       inflight = null;
     }

@@ -731,7 +731,8 @@ export default function ListingDetailPage() {
                         title="Refresh SOL/USD"
                       >
                         {solPrice ? `$${solPrice.usd.toFixed(2)}` : '…'} / SOL
-                        {solPrice?.source === 'fallback' && <span className="ml-1 text-clay">stale</span>}
+                        {solPrice?.source === 'stale' && <span className="ml-1 text-clay">stale</span>}
+                        {!solPrice && <span className="ml-1 text-clay">offline</span>}
                       </button>
                     </div>
                     {solQuote ? (
