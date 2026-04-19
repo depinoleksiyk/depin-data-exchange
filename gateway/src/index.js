@@ -1,148 +1,404 @@
-/**
- * DePIN Data Gateway
- *
- * Verifies on-chain subscription/payment, then delivers
- * requested data to the buyer. Supports query and stream endpoints.
- */
-
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { Connection, PublicKey } = require('@solana/web3.js');
+const rateLimit = require('express-rate-limit');
+const pinoHttp = require('pino-http');
+const http = require('node:http');
+const { WebSocketServer } = require('ws');
+const { PublicKey } = require('@solana/web3.js');
+
+const config = require('./config');
+const logger = require('./logger');
+const db = require('./db');
+const chain = require('./chain');
+const data = require('./data');
+const {
+  hashKey,
+  parseBearer,
+  constantTimeEqual,
+  toHex,
+} = require('./access-keys');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-const PORT = process.env.GATEWAY_PORT || 5000;
-const RPC_URL = process.env.GATEWAY_RPC_URL || 'https://api.devnet.solana.com';
-const PROGRAM_ID = process.env.PROGRAM_ID || '5mnqN7onSgqy9tBCTJ46N2mGr4Ty68fvCg4HqK5TsdTo';
+// --- middleware ---------------------------------------------------------
+app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/health' } }));
+app.use(
+  express.json({
+    limit: config.bodyLimit,
+  })
+);
 
-const connection = new Connection(RPC_URL, 'confirmed');
-
-// Replay protection — track used tx signatures
-const usedTxSignatures = new Set();
-
-// Sample datasets for demo
-const SAMPLE_DATA = {
-  GPS: [
-    { lat: 37.7749, lng: -122.4194, timestamp: Date.now(), accuracy: 3.2, source: 'helium-hotspot-sf-01' },
-    { lat: 37.7751, lng: -122.4183, timestamp: Date.now() - 60000, accuracy: 2.8, source: 'helium-hotspot-sf-01' },
-    { lat: 37.7748, lng: -122.4201, timestamp: Date.now() - 120000, accuracy: 4.1, source: 'helium-hotspot-sf-02' },
-  ],
-  Weather: [
-    { temp: 18.5, humidity: 72, pressure: 1013.2, wind_speed: 12.3, timestamp: Date.now(), station: 'wx-node-bay-01' },
-    { temp: 17.8, humidity: 75, pressure: 1013.5, wind_speed: 11.1, timestamp: Date.now() - 300000, station: 'wx-node-bay-01' },
-  ],
-  Network: [
-    { uptime: 99.7, latency_ms: 23, bandwidth_mbps: 450, peers: 42, timestamp: Date.now(), node: 'render-node-us-west' },
-    { uptime: 99.9, latency_ms: 18, bandwidth_mbps: 520, peers: 38, timestamp: Date.now() - 600000, node: 'render-node-us-east' },
-  ],
-  Camera: [
-    { frame_id: 'hm-sf-001-f1234', resolution: '4K', coverage_km: 0.8, timestamp: Date.now(), device: 'hivemapper-dashcam-01' },
-  ],
+const corsOptions = {
+  origin(origin, cb) {
+    if (!origin) return cb(null, true); // curl / server-side
+    if (config.corsOrigins.length === 0) return cb(null, true); // dev = wildcard
+    cb(null, config.corsOrigins.includes(origin));
+  },
+  credentials: false,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-buyer-pubkey', 'x-payment-tx'],
 };
+app.use(cors(corsOptions));
+
+const limiter = rateLimit({
+  windowMs: config.rateLimit.windowMs,
+  max: config.rateLimit.max,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
+app.use(limiter);
+
+// --- helpers ------------------------------------------------------------
+
+function problem(res, status, code, message, extras = {}) {
+  return res.status(status).json({ error: code, message, ...extras });
+}
+
+async function authenticateAccessKey(req) {
+  const key = parseBearer(req.headers.authorization);
+  if (!key) return { ok: false, reason: 'missing_bearer' };
+  const keyHash = hashKey(key);
+  const row = db.lookupAccessKey(keyHash);
+  if (!row) return { ok: false, reason: 'unknown_key' };
+
+  const now = Math.floor(Date.now() / 1000);
+  if (row.exp_at < now) return { ok: false, reason: 'expired' };
+  if (row.queries_used >= row.queries_limit) return { ok: false, reason: 'quota_exhausted' };
+
+  // Re-verify on-chain on every request — guards against revoked or renewed subs.
+  const subPubkey = new PublicKey(row.subscription);
+  const sub = await chain.fetchSubscription(subPubkey);
+  if (!sub) return { ok: false, reason: 'subscription_gone' };
+  if (!sub.accessKeyActive) return { ok: false, reason: 'access_key_revoked' };
+  if (!constantTimeEqual(keyHash, Buffer.from(sub.accessKeyHash))) {
+    return { ok: false, reason: 'key_mismatch' };
+  }
+  if (Number(sub.expiresAt) <= now) return { ok: false, reason: 'subscription_expired' };
+  if (Number(sub.queriesUsed) >= Number(sub.queriesLimit)) {
+    return { ok: false, reason: 'chain_quota_exhausted' };
+  }
+
+  return { ok: true, keyHash, row, sub };
+}
+
+// --- routes -------------------------------------------------------------
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'depin-data-gateway' });
+  res.json({
+    status: 'ok',
+    service: 'depin-data-gateway',
+    programId: config.programId,
+    rpc: config.rpcUrl.replace(/[?&]api-key=.+$/, ''),
+  });
 });
 
-/**
- * POST /v1/query/:listingId
- *
- * Headers:
- *   x-buyer-pubkey: buyer wallet
- *   x-payment-tx: payment transaction signature
- *
- * Body: { dataType, params }
- */
-app.post('/v1/query/:listingId', async (req, res) => {
+app.get('/v1/listings', (_req, res) => {
+  res.json({ dataTypes: data.listingMetadata() });
+});
+
+app.get('/v1/preview/:listingId', (req, res) => {
   const { listingId } = req.params;
-  const buyerPubkey = req.headers['x-buyer-pubkey'];
-  const paymentTx = req.headers['x-payment-tx'];
-
-  if (!buyerPubkey || !paymentTx) {
-    return res.status(402).json({
-      error: 'Payment Required',
-      message: 'Include x-buyer-pubkey and x-payment-tx headers',
-    });
-  }
-
-  // Replay protection — reject reused tx signatures
-  if (usedTxSignatures.has(paymentTx)) {
-    return res.status(402).json({ error: 'Transaction signature already used' });
-  }
-
-  // Verify payment transaction exists
-  try {
-    const txInfo = await connection.getTransaction(paymentTx, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
-    });
-
-    if (!txInfo || (txInfo.meta && txInfo.meta.err)) {
-      return res.status(402).json({ error: 'Payment not verified' });
-    }
-
-    usedTxSignatures.add(paymentTx);
-  } catch (err) {
-    console.log(`[gateway] payment check failed: ${err.message}`);
-    return res.status(402).json({ error: 'Payment verification failed' });
-  }
-
-  // Deliver data based on requested type
-  const { dataType, params } = req.body;
-  const data = SAMPLE_DATA[dataType] || SAMPLE_DATA['GPS'];
-
-  // Apply basic filtering if params provided
-  let filteredData = data;
-  if (params && params.limit) {
-    filteredData = data.slice(0, params.limit);
-  }
-
-  return res.json({
+  const { type } = req.query;
+  const sample = data.samplesFor(type).rows.slice(0, 1);
+  res.json({
     listingId,
-    dataType: dataType || 'GPS',
-    records: filteredData,
-    count: filteredData.length,
+    preview: true,
+    dataType: data.samplesFor(type).type,
+    sample,
+    note: 'Issue an access key via /v1/access-keys/issue for full access',
+  });
+});
+
+// Activate an access key: client generates it locally, commits the hash
+// on-chain via issue_access_key, then proves control by submitting the raw
+// key + the tx signature here.
+app.post('/v1/access-keys/issue', async (req, res) => {
+  const { subscription, accessKey, txSignature } = req.body || {};
+  if (!subscription || !accessKey || !txSignature) {
+    return problem(res, 400, 'invalid_body', 'subscription, accessKey and txSignature required');
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(accessKey)) {
+    return problem(res, 400, 'invalid_access_key', 'access key must be 32-byte hex');
+  }
+
+  let subPubkey;
+  try {
+    subPubkey = new PublicKey(subscription);
+  } catch {
+    return problem(res, 400, 'invalid_subscription', 'subscription not a valid pubkey');
+  }
+
+  if (db.isTxUsed(txSignature)) {
+    return problem(res, 409, 'tx_already_used', 'this tx signature was already consumed');
+  }
+
+  const parsed = await chain.fetchTxEvents(txSignature);
+  if (!parsed.ok) {
+    return problem(res, 402, 'tx_unverified', parsed.reason);
+  }
+  const issued = parsed.events.find((e) => e.name === 'AccessKeyIssued');
+  if (!issued) {
+    return problem(res, 422, 'wrong_tx', 'tx did not emit AccessKeyIssued event');
+  }
+  if (issued.data.subscription.toBase58() !== subscription) {
+    return problem(res, 422, 'subscription_mismatch', 'tx event references a different subscription');
+  }
+
+  const sub = await chain.fetchSubscription(subPubkey);
+  if (!sub) {
+    return problem(res, 404, 'subscription_not_found', 'on-chain subscription missing');
+  }
+
+  const keyHash = hashKey(accessKey);
+  if (!constantTimeEqual(keyHash, Buffer.from(sub.accessKeyHash))) {
+    return problem(res, 422, 'hash_mismatch', 'provided key does not match on-chain hash');
+  }
+  if (!sub.accessKeyActive) {
+    return problem(res, 409, 'key_inactive', 'on-chain record shows key is not active');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  db.storeAccessKey({
+    keyHash,
+    subscription,
+    listing: sub.listing.toBase58(),
+    buyer: sub.buyer.toBase58(),
+    expAt: Math.min(Number(sub.expiresAt), now + config.accessKeyTtlSec),
+    queriesLimit: Number(sub.queriesLimit),
+    queriesUsed: Number(sub.queriesUsed),
+    issuedAt: now,
+  });
+  db.markTxUsed(txSignature, sub.listing.toBase58(), sub.buyer.toBase58(), 'access_key');
+
+  res.json({
+    ok: true,
+    listing: sub.listing.toBase58(),
+    buyer: sub.buyer.toBase58(),
+    expAt: Math.min(Number(sub.expiresAt), now + config.accessKeyTtlSec),
+    queriesLimit: Number(sub.queriesLimit),
+  });
+});
+
+// Fire a query using an access key.
+app.post('/v1/query/:listingId', async (req, res) => {
+  const auth = await authenticateAccessKey(req);
+  if (!auth.ok) {
+    const status = auth.reason === 'missing_bearer' ? 401 : 403;
+    return problem(res, status, auth.reason, 'access key validation failed');
+  }
+
+  const { listingId } = req.params;
+  const { dataType, limit } = req.body || {};
+
+  if (auth.row.listing !== listingId) {
+    return problem(res, 403, 'listing_mismatch', 'access key is for a different listing');
+  }
+
+  const samples = data.samplesFor(dataType);
+  const rows = limit && Number.isFinite(+limit) ? samples.rows.slice(0, +limit) : samples.rows;
+
+  db.bumpAccessKeyUsage(auth.keyHash);
+
+  res.json({
+    listing: auth.row.listing,
+    dataType: samples.type,
+    rows,
+    count: rows.length,
+    deliveredAt: new Date().toISOString(),
+    quota: {
+      used: auth.row.queries_used + 1,
+      limit: auth.row.queries_limit,
+    },
+  });
+});
+
+// Pay-per-query path: buyer submits a query_data tx, we verify event + deliver.
+app.post('/v1/query-tx/:listingId', async (req, res) => {
+  const { listingId } = req.params;
+  const { txSignature, dataType, limit } = req.body || {};
+
+  if (!txSignature) return problem(res, 400, 'missing_tx', 'txSignature required');
+  if (db.isTxUsed(txSignature)) {
+    return problem(res, 409, 'tx_already_used', 'this signature was already consumed');
+  }
+
+  const parsed = await chain.fetchTxEvents(txSignature);
+  if (!parsed.ok) {
+    return problem(res, 402, 'tx_unverified', parsed.reason);
+  }
+  const executed = parsed.events.find((e) => e.name === 'QueryExecuted');
+  if (!executed) {
+    return problem(res, 422, 'wrong_tx', 'tx did not emit QueryExecuted event');
+  }
+  if (executed.data.listing.toBase58() !== listingId) {
+    return problem(res, 422, 'listing_mismatch', 'event listing does not match path');
+  }
+
+  db.markTxUsed(
+    txSignature,
+    executed.data.listing.toBase58(),
+    executed.data.buyer.toBase58(),
+    'pay_per_query'
+  );
+
+  const samples = data.samplesFor(dataType);
+  const rows = limit && Number.isFinite(+limit) ? samples.rows.slice(0, +limit) : samples.rows;
+  res.json({
+    listing: listingId,
+    buyer: executed.data.buyer.toBase58(),
+    dataType: samples.type,
+    rows,
+    count: rows.length,
     deliveredAt: new Date().toISOString(),
   });
 });
 
-/**
- * GET /v1/preview/:listingId
- *
- * Returns a sample preview (no payment needed).
- */
-app.get('/v1/preview/:listingId', (req, res) => {
+// Serve a random sample + Merkle proof matching the current committed root.
+app.get('/v1/sample-proof/:listingId', async (req, res) => {
   const { listingId } = req.params;
-  const dataType = req.query.type || 'GPS';
-  const sample = (SAMPLE_DATA[dataType] || SAMPLE_DATA['GPS']).slice(0, 1);
+  const { type } = req.query;
 
-  return res.json({
-    listingId,
-    preview: true,
-    dataType,
-    sample,
-    message: 'Subscribe or pay per query for full access',
+  const samples = data.samplesFor(type);
+  const tree = data.buildMerkle(samples.rows);
+  const idx = Math.floor(Math.random() * samples.rows.length);
+  const leaf = samples.rows[idx];
+  const proof = data.proofFor(tree.layers, idx);
+
+  let onChainRoot = null;
+  try {
+    const listing = await chain.fetchListing(new PublicKey(listingId));
+    if (listing && listing.snapshotRoot) {
+      onChainRoot = Buffer.from(listing.snapshotRoot).toString('hex');
+    }
+  } catch {
+    // listingId can be a shorthand for demo purposes — proof still valid off-chain.
+  }
+
+  res.json({
+    listing: listingId,
+    dataType: samples.type,
+    leaf,
+    leafHash: toHex(data.leafHashFor(leaf)),
+    root: toHex(tree.root),
+    onChainRoot,
+    proof,
   });
 });
 
-/**
- * GET /v1/listings
- *
- * List available data types and sample metadata.
- */
-app.get('/v1/listings', (_req, res) => {
-  const types = Object.keys(SAMPLE_DATA).map(type => ({
-    dataType: type,
-    sampleCount: SAMPLE_DATA[type].length,
-    fields: Object.keys(SAMPLE_DATA[type][0] || {}),
-  }));
-
-  return res.json({ dataTypes: types });
+// Expose which subscription a buyer owns for a listing — frontend helper.
+app.get('/v1/subscription', async (req, res) => {
+  const { listing, buyer } = req.query;
+  if (!listing || !buyer) return problem(res, 400, 'missing_params', 'listing & buyer required');
+  try {
+    const listingPubkey = new PublicKey(listing);
+    const buyerPubkey = new PublicKey(buyer);
+    const subPubkey = chain.findSubscriptionPda(listingPubkey, buyerPubkey);
+    const sub = await chain.fetchSubscription(subPubkey);
+    if (!sub) return res.json({ found: false, subscription: subPubkey.toBase58() });
+    res.json({
+      found: true,
+      subscription: subPubkey.toBase58(),
+      expiresAt: Number(sub.expiresAt),
+      queriesUsed: Number(sub.queriesUsed),
+      queriesLimit: Number(sub.queriesLimit),
+      hasRated: sub.hasRated,
+      accessKeyActive: sub.accessKeyActive,
+    });
+  } catch (err) {
+    return problem(res, 400, 'invalid_pubkey', err.message);
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`[gateway] DePIN Data Gateway on port ${PORT}`);
+// --- 404 + error shields ------------------------------------------------
+app.use((req, res) => problem(res, 404, 'not_found', `no route for ${req.method} ${req.url}`));
+app.use((err, _req, res, _next) => {
+  logger.error({ err: err.message, stack: err.stack }, 'unhandled error');
+  res.status(500).json({ error: 'internal_error', message: 'unexpected server error' });
+});
+
+// --- server + WebSocket fanout ------------------------------------------
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: '/events' });
+
+wss.on('connection', (ws) => {
+  ws.send(JSON.stringify({ type: 'hello', programId: config.programId }));
+  ws.on('error', () => {}); // keep server alive on client aborts
+});
+
+function broadcast(msg) {
+  const payload = JSON.stringify(msg);
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.send(payload);
+  }
+}
+
+let logSubscriptionId = null;
+async function wireProgramStream() {
+  if (logSubscriptionId !== null) {
+    // avoid stacking duplicate listeners on reconnect
+    try {
+      await chain.getConnection().removeOnLogsListener(logSubscriptionId);
+    } catch {
+      /* listener may already be gone */
+    }
+    logSubscriptionId = null;
+  }
+  try {
+    logSubscriptionId = await chain.subscribeToProgramLogs((event) => {
+      const safeData = {};
+      for (const [k, v] of Object.entries(event.data || {})) {
+        if (v && typeof v === 'object') {
+          if (typeof v.toBase58 === 'function') {
+            safeData[k] = v.toBase58();
+          } else if (typeof v.toString === 'function' && v.constructor?.name === 'BN') {
+            safeData[k] = v.toString();
+          } else if (Array.isArray(v)) {
+            safeData[k] = v;
+          } else {
+            try {
+              safeData[k] = JSON.parse(JSON.stringify(v));
+            } catch {
+              safeData[k] = String(v);
+            }
+          }
+        } else {
+          safeData[k] = v;
+        }
+      }
+      broadcast({ type: 'event', name: event.name, data: safeData, signature: event.signature });
+      if (event.name === 'AccessKeyRevoked' && event.data?.subscription) {
+        try {
+          db.revokeSubscription(event.data.subscription.toBase58());
+        } catch (err) {
+          logger.debug({ err: err.message }, 'revoke handler failed');
+        }
+      }
+    });
+    logger.info({ id: logSubscriptionId }, 'subscribed to program logs');
+  } catch (err) {
+    logger.warn({ err: err.message }, 'program log subscription failed (continuing without stream)');
+  }
+}
+
+// sweep stale tx records once an hour
+setInterval(() => {
+  const cutoff = Date.now() - config.replayTtlSec * 1000;
+  const removed = db.sweepTx(cutoff);
+  if (removed > 0) logger.debug({ removed }, 'replay-store swept');
+}, 60 * 60 * 1000).unref();
+
+server.listen(config.port, () => {
+  logger.info(
+    { port: config.port, programId: config.programId, rpc: config.rpcUrl },
+    'depin-data-gateway listening'
+  );
+  if (process.env.GATEWAY_SKIP_STREAM !== '1') {
+    wireProgramStream();
+  }
+});
+
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down');
+  server.close(() => process.exit(0));
 });
