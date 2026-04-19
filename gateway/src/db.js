@@ -3,6 +3,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 
 const config = require('./config');
+const secretBox = require('./secret-box');
 
 const dir = path.dirname(config.dbPath);
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -174,12 +175,14 @@ module.exports = {
            secret = excluded.secret,
            updated_at = excluded.updated_at`
       )
-      .run(listing, provider, url, secret || '', Date.now());
+      .run(listing, provider, url, secretBox.encrypt(secret || ''), Date.now());
   },
   getListingSource(listing) {
-    return db
+    const row = db
       .prepare('SELECT listing, provider, url, secret, updated_at FROM listing_sources WHERE listing = ?')
       .get(listing);
+    if (!row) return row;
+    return { ...row, secret: secretBox.decrypt(row.secret) };
   },
   deleteListingSource(listing) {
     return db.prepare('DELETE FROM listing_sources WHERE listing = ?').run(listing).changes;
