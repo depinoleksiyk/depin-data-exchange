@@ -93,3 +93,19 @@ pub struct ListingRated {
     pub rating: u8,
     pub new_score: u8,
 }
+
+#[event]
+pub struct ProviderRegistered {
+    pub wallet: Pubkey,
+    pub at: i64,
+}
+
+#[event]
+pub struct ListingCreated {
+    pub listing: Pubkey,
+    pub provider: Pubkey,
+    pub listing_id: u64,
+    pub price_per_query: u64,
+    pub price_subscription_monthly: u64,
+    pub at: i64,
+}
