@@ -100,8 +100,13 @@ export function LiveFeed() {
                 [{ id: shortid(), kind: palette.label, subject: `${subject}…`, detail, t: Date.now(), tone: palette.tone }, ...prev].slice(0, 14)
               );
             }
-          } catch {
-            /* non-json */
+          } catch (err) {
+            // Non-JSON frames shouldn't happen in normal operation — surface
+            // them so broken event formats are noticed in dev and
+            // anomalous floods stand out in prod logs.
+            if (typeof console !== 'undefined') {
+              console.warn('[LiveFeed] dropped non-JSON frame', err);
+            }
           }
         };
       } catch {
