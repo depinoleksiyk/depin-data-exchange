@@ -196,8 +196,22 @@ export default function ProviderPage() {
     }
     const ppq = parseFloat(form.ppq || '0');
     const sub = parseFloat(form.sub || '0');
-    if (!Number.isFinite(ppq) || ppq < 0 || !Number.isFinite(sub) || sub < 0) {
-      setToast({ tone: 'error', title: 'Invalid pricing', body: 'USDC values must be non-negative numbers.' });
+    // Contract caps at 1,000,000 USDC; keep the client check a touch tighter
+    // so the UI rejects nonsense before a tx round-trip.
+    const PRICE_CAP_USDC = 1_000_000;
+    if (
+      !Number.isFinite(ppq) ||
+      ppq < 0 ||
+      ppq > PRICE_CAP_USDC ||
+      !Number.isFinite(sub) ||
+      sub < 0 ||
+      sub > PRICE_CAP_USDC
+    ) {
+      setToast({
+        tone: 'error',
+        title: 'Invalid pricing',
+        body: `USDC values must be between 0 and ${PRICE_CAP_USDC.toLocaleString()}.`,
+      });
       return;
     }
     setTxBusy('listing');
