@@ -45,6 +45,7 @@ import { Reveal } from '../../components/Reveal';
 import { CountUp } from '../../components/CountUp';
 import { authedQuery, issueAccessKey, payWithSol, samplePreview, sampleProof } from '../../lib/gateway';
 import { formatSol, usdcRawToLamports, useSolPrice } from '../../lib/sol-price';
+import { clearAccessKey, loadAccessKey, saveAccessKey } from '../../lib/access-key-store';
 
 const MONTH_OPTIONS = [1, 3, 6, 12];
 
@@ -75,7 +76,18 @@ export default function ListingDetailPage() {
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const { price: solPrice, refresh: refreshSolPrice } = useSolPrice();
 
-  const [accessKey, setAccessKey] = useState<string | null>(null);
+  const [accessKey, _setAccessKey] = useState<string | null>(null);
+  const setAccessKey = useCallback(
+    (key: string | null) => {
+      _setAccessKey(key);
+      if (subscription) {
+        const subKey = subscription.pubkey.toBase58();
+        if (key) saveAccessKey(subKey, key);
+        else clearAccessKey(subKey);
+      }
+    },
+    [subscription]
+  );
   const [queryType, setQueryType] = useState<string>('gps');
   const [queryResult, setQueryResult] = useState<any>(null);
   const [preview, setPreview] = useState<any>(null);
@@ -101,6 +113,10 @@ export default function ListingDetailPage() {
       if (publicKey) {
         const sub = await fetchSubscriptionView(program, listingPubkey, publicKey);
         setSubscription(sub);
+        if (sub?.accessKeyActive) {
+          const cached = loadAccessKey(sub.pubkey.toBase58());
+          if (cached) _setAccessKey(cached);
+        }
       } else {
         setSubscription(null);
       }
@@ -557,6 +573,16 @@ export default function ListingDetailPage() {
             </Reveal>
           )}
 
+          {accessKey && listing && (
+            <Reveal>
+              <UsageSnippets
+                listingPubkey={listing.pubkey.toBase58()}
+                dataType={listing.dataType}
+                accessKey={accessKey}
+              />
+            </Reveal>
+          )}
+
           <Reveal>
             <section className="panel p-6">
               <div className="text-xs uppercase tracking-[0.16em] text-ink-soft">On-chain pointers</div>
@@ -757,6 +783,162 @@ export default function ListingDetailPage() {
       </div>
 
       <Toast message={toast} onDismiss={() => setToast(null)} />
+    </div>
+  );
+}
+
+type SnippetLang = 'curl' | 'js' | 'python';
+
+function UsageSnippets({
+  listingPubkey,
+  dataType,
+  accessKey,
+}: {
+  listingPubkey: string;
+  dataType: string;
+  accessKey: string;
+}) {
+  const [lang, setLang] = useState<SnippetLang>('curl');
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const gatewayBase =
+    typeof window === 'undefined' ? 'http://localhost:4001' : `${window.location.origin}/api`;
+  const dataTypeLower = dataType.toLowerCase();
+
+  const snippets: Record<SnippetLang, string> = {
+    curl: `curl -X POST ${gatewayBase}/v1/query/${listingPubkey} \\
+  -H "Authorization: Bearer ${accessKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"dataType":"${dataTypeLower}","limit":5}'`,
+    js: `const r = await fetch(
+  '${gatewayBase}/v1/query/${listingPubkey}',
+  {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ${accessKey}',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ dataType: '${dataTypeLower}', limit: 5 }),
+  },
+);
+const data = await r.json();
+console.log(data.rows);`,
+    python: `import httpx
+
+r = httpx.post(
+    "${gatewayBase}/v1/query/${listingPubkey}",
+    headers={"Authorization": "Bearer ${accessKey}"},
+    json={"dataType": "${dataTypeLower}", "limit": 5},
+)
+print(r.json()["rows"])`,
+  };
+
+  const copy = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      setTimeout(() => setCopied((c) => (c === id ? null : c)), 1400);
+    } catch {
+      /* clipboard not available */
+    }
+  };
+
+  return (
+    <section className="panel p-6">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <div className="text-xs uppercase tracking-[0.16em] text-ink-soft">How to pull data</div>
+          <div className="font-display text-lg mt-1">Drop in and go</div>
+        </div>
+        <div className="flex items-center gap-0.5 bg-parchment/70 rounded-md p-0.5">
+          {(['curl', 'js', 'python'] as SnippetLang[]).map((l) => (
+            <button
+              key={l}
+              onClick={() => setLang(l)}
+              className={`px-2.5 py-1 text-[11px] font-medium rounded transition-all ${
+                lang === l ? 'bg-ink text-cream' : 'text-ink-muted hover:text-ink'
+              }`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <p className="text-[13px] text-ink-muted leading-relaxed mb-3">
+        Your access key behaves like an API token. Send it as a{' '}
+        <code className="font-mono text-[12px] bg-earth-50 px-1 py-0.5 rounded">Authorization: Bearer …</code>{' '}
+        header and the gateway streams rows without another wallet signature.
+      </p>
+
+      <div className="relative group">
+        <pre className="font-mono text-[12px] bg-ink text-cream rounded-lg p-4 pr-12 overflow-x-auto leading-relaxed whitespace-pre">
+          {snippets[lang]}
+        </pre>
+        <button
+          onClick={() => copy('snippet', snippets[lang])}
+          className="absolute top-3 right-3 px-2 py-1 text-[10px] uppercase tracking-widest bg-cream/10 text-cream/80 hover:bg-cream hover:text-ink rounded transition-all"
+        >
+          {copied === 'snippet' ? 'copied' : 'copy'}
+        </button>
+      </div>
+
+      <div className="mt-4 grid sm:grid-cols-2 gap-3 text-[12px]">
+        <InfoRow
+          label="Bearer token"
+          value={accessKey}
+          onCopy={() => copy('key', accessKey)}
+          copied={copied === 'key'}
+        />
+        <InfoRow
+          label="Listing id"
+          value={listingPubkey}
+          onCopy={() => copy('id', listingPubkey)}
+          copied={copied === 'id'}
+        />
+      </div>
+
+      <ul className="mt-4 space-y-1.5 text-[12px] text-ink-muted">
+        <li>
+          <span className="inline-block w-4 text-forest">•</span>
+          <code className="font-mono text-[11px]">limit</code> accepts 1–5 rows per call.
+        </li>
+        <li>
+          <span className="inline-block w-4 text-forest">•</span>
+          1 000 queries/month are baked into each subscription.
+        </li>
+        <li>
+          <span className="inline-block w-4 text-forest">•</span>
+          Lost the key? Hit <em>Re-issue access key</em> on the right — only costs a signature.
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+  onCopy,
+  copied,
+}: {
+  label: string;
+  value: string;
+  onCopy: () => void;
+  copied: boolean;
+}) {
+  return (
+    <div className="bg-parchment rounded-md px-3 py-2 flex items-center justify-between gap-2">
+      <div className="min-w-0">
+        <div className="text-[10px] uppercase tracking-wider text-ink-soft">{label}</div>
+        <div className="font-mono text-[11px] text-ink truncate">{value}</div>
+      </div>
+      <button
+        onClick={onCopy}
+        className="text-[10px] uppercase tracking-wider text-ink-soft hover:text-forest transition-colors shrink-0"
+      >
+        {copied ? 'copied' : 'copy'}
+      </button>
     </div>
   );
 }
