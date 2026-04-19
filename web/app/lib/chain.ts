@@ -222,19 +222,6 @@ export async function ensureUsdcAta(
   return ata;
 }
 
-export async function airdropUsdcIx(
-  connection: Connection,
-  ata: PublicKey,
-  owner: PublicKey,
-  amountRaw: bigint
-): Promise<TransactionInstruction | null> {
-  // mock USDC is freely mintable by the exchange authority — we only use this
-  // for demo purposes; the instruction requires the authority's signature so
-  // we can't mint directly from the buyer. This is a no-op placeholder unless
-  // the client is the authority.
-  return null;
-}
-
 export function randomAccessKey(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
