@@ -333,6 +333,10 @@ app.post('/v1/pay-with-sol', async (req, res) => {
   } catch (err) {
     const status = err?.status || 500;
     const code = status === 422 ? 'tx_shape_rejected' : 'pay_sol_failed';
+    logger.warn(
+      { status, code, msg: err?.message, stack: err?.stack?.split('\n').slice(0, 4) },
+      'pay-with-sol rejected'
+    );
     return problem(res, status, code, err.message || 'unknown error');
   }
 });
