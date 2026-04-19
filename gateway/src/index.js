@@ -40,13 +40,38 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-const limiter = rateLimit({
+// Baseline limiter — per-IP for all unauthenticated traffic. Generous so
+// preview / listings / sample-proof aren't painful during dev.
+const baseLimiter = rateLimit({
   windowMs: config.rateLimit.windowMs,
   max: config.rateLimit.max,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
 });
-app.use(limiter);
+
+// Dedicated limiter for /v1/query/* — keyed by the hash of the access-key
+// bearer token when one is present, so a single paying customer sharing an
+// office IP isn't bottlenecked by everyone else. Falls back to IP for the
+// missing/invalid-bearer case (which will be rejected by the auth step
+// anyway, but we still want to throttle it).
+const authedLimiter = rateLimit({
+  windowMs: config.rateLimit.windowMs,
+  max: config.rateLimit.maxAuthed,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const bearer = parseBearer(req.headers.authorization);
+    if (bearer) return `bearer:${bearer.slice(0, 16)}`;
+    return `ip:${req.ip || 'unknown'}`;
+  },
+});
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/v1/query/')) {
+    return authedLimiter(req, res, next);
+  }
+  return baseLimiter(req, res, next);
+});
 
 // --- helpers ------------------------------------------------------------
 

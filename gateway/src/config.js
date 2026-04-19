@@ -27,6 +27,9 @@ const config = {
   rateLimit: {
     windowMs: intEnv('GATEWAY_RATE_WINDOW_MS', 60_000),
     max: intEnv('GATEWAY_RATE_MAX', 60),
+    // separate, higher ceiling for authenticated /v1/query/* — each buyer
+    // gets their own bucket keyed on the bearer hash.
+    maxAuthed: intEnv('GATEWAY_RATE_MAX_AUTHED', 240),
   },
   replayTtlSec: intEnv('GATEWAY_REPLAY_TTL_SEC', 30 * 24 * 3600), // 30 days
   accessKeyTtlSec: intEnv('GATEWAY_ACCESS_KEY_TTL_SEC', 24 * 3600),
