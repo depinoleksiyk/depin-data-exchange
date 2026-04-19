@@ -9,14 +9,18 @@ type AnchorWallet = {
   signAllTransactions: <T>(txs: T[]) => Promise<T[]>;
 };
 
-let cachedReadOnly: Program | null = null;
+// Keyed by RPC endpoint so switching networks (e.g. devnet → mainnet via
+// wallet change) doesn't reuse a program bound to the old connection.
+const readOnlyCache = new Map<string, Program>();
 
 export function marketplaceClient(connection: Connection, wallet?: AnchorWallet): Program {
   if (wallet) {
     const prov = new AnchorProvider(connection, wallet as any, { commitment: 'confirmed' });
     return new Program(idl as any, prov);
   }
-  if (cachedReadOnly) return cachedReadOnly;
+  const endpoint = connection.rpcEndpoint;
+  const cached = readOnlyCache.get(endpoint);
+  if (cached) return cached;
   const stub = Keypair.generate();
   const prov = new AnchorProvider(
     connection,
@@ -27,8 +31,9 @@ export function marketplaceClient(connection: Connection, wallet?: AnchorWallet)
     } as any,
     { commitment: 'confirmed' }
   );
-  cachedReadOnly = new Program(idl as any, prov);
-  return cachedReadOnly;
+  const program = new Program(idl as any, prov);
+  readOnlyCache.set(endpoint, program);
+  return program;
 }
 
 export { PROGRAM_ID };
