@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::errors::ExchangeError;
 use crate::constants::*;
+use crate::events::QueryExecuted;
 
 #[derive(Accounts)]
 pub struct QueryData<'info> {
@@ -31,34 +32,30 @@ pub fn handler(ctx: Context<QueryData>) -> Result<()> {
     let clock = Clock::get()?;
     let sub = &mut ctx.accounts.subscription;
 
-    // verify subscription is still active
     require!(
         clock.unix_timestamp < sub.expires_at,
         ExchangeError::SubscriptionExpired
     );
 
-    // verify query limit not exceeded
     require!(
         sub.queries_used < sub.queries_limit,
         ExchangeError::QueryLimitReached
     );
 
-    // increment query counter
     sub.queries_used = sub.queries_used
         .checked_add(1)
         .ok_or(ExchangeError::PaymentOverflow)?;
 
-    // increment listing total queries
     ctx.accounts.listing.total_queries = ctx.accounts.listing.total_queries
         .checked_add(1)
         .ok_or(ExchangeError::PaymentOverflow)?;
 
-    msg!(
-        "Query #{} by {} on listing {}",
-        sub.queries_used,
-        ctx.accounts.buyer.key(),
-        ctx.accounts.listing.key()
-    );
+    emit!(QueryExecuted {
+        listing: ctx.accounts.listing.key(),
+        buyer: ctx.accounts.buyer.key(),
+        queries_used: sub.queries_used,
+        at: clock.unix_timestamp,
+    });
 
     Ok(())
 }

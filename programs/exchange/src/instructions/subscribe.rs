@@ -3,6 +3,7 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::state::*;
 use crate::errors::ExchangeError;
 use crate::constants::*;
+use crate::events::SubscriptionCreated;
 
 #[derive(Accounts)]
 pub struct Subscribe<'info> {
@@ -11,14 +12,14 @@ pub struct Subscribe<'info> {
         seeds = [EXCHANGE_SEED],
         bump = exchange.bump,
     )]
-    pub exchange: Account<'info, DataExchange>,
+    pub exchange: Box<Account<'info, DataExchange>>,
     #[account(
         mut,
         seeds = [LISTING_SEED, listing.provider.as_ref(), &listing.listing_id.to_le_bytes()],
         bump = listing.bump,
         constraint = listing.is_active @ ExchangeError::ListingNotActive,
     )]
-    pub listing: Account<'info, DataListing>,
+    pub listing: Box<Account<'info, DataListing>>,
     #[account(
         init,
         payer = buyer,
@@ -26,31 +27,31 @@ pub struct Subscribe<'info> {
         seeds = [SUBSCRIPTION_SEED, listing.key().as_ref(), buyer.key().as_ref()],
         bump,
     )]
-    pub subscription: Account<'info, DataSubscription>,
+    pub subscription: Box<Account<'info, DataSubscription>>,
     #[account(
         mut,
         constraint = buyer_usdc.mint == exchange.usdc_mint @ ExchangeError::InsufficientPayment,
         constraint = buyer_usdc.owner == buyer.key() @ ExchangeError::Unauthorized,
     )]
-    pub buyer_usdc: Account<'info, TokenAccount>,
+    pub buyer_usdc: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         constraint = provider_usdc.mint == exchange.usdc_mint @ ExchangeError::InsufficientPayment,
         constraint = provider_usdc.owner == listing.provider @ ExchangeError::Unauthorized,
     )]
-    pub provider_usdc: Account<'info, TokenAccount>,
+    pub provider_usdc: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         constraint = treasury_usdc.mint == exchange.usdc_mint @ ExchangeError::InsufficientPayment,
         constraint = treasury_usdc.owner == exchange.treasury @ ExchangeError::Unauthorized,
     )]
-    pub treasury_usdc: Account<'info, TokenAccount>,
+    pub treasury_usdc: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         seeds = [PROVIDER_SEED, listing.provider.as_ref()],
         bump = provider.bump,
     )]
-    pub provider: Account<'info, DataProvider>,
+    pub provider: Box<Account<'info, DataProvider>>,
     #[account(mut)]
     pub buyer: Signer<'info>,
     pub token_program: Program<'info, Token>,
@@ -76,22 +77,30 @@ pub fn handler(ctx: Context<Subscribe>, duration_months: u8) -> Result<()> {
         .checked_sub(commission)
         .ok_or(ExchangeError::PaymentOverflow)?;
 
+    let expires_at = clock.unix_timestamp
+        .checked_add(
+            (duration_months as i64)
+                .checked_mul(SECONDS_PER_MONTH)
+                .ok_or(ExchangeError::PaymentOverflow)?
+        )
+        .ok_or(ExchangeError::PaymentOverflow)?;
+
+    let queries_limit = (duration_months as u64)
+        .checked_mul(DEFAULT_QUERIES_PER_MONTH)
+        .ok_or(ExchangeError::PaymentOverflow)?;
+
     // state updates BEFORE CPI
     let sub = &mut ctx.accounts.subscription;
     sub.buyer = ctx.accounts.buyer.key();
     sub.listing = ctx.accounts.listing.key();
     sub.started_at = clock.unix_timestamp;
-    sub.expires_at = clock.unix_timestamp
-        .checked_add(
-            (duration_months as i64)
-                .checked_mul(30 * 24 * 3600)
-                .ok_or(ExchangeError::PaymentOverflow)?
-        )
-        .ok_or(ExchangeError::PaymentOverflow)?;
+    sub.expires_at = expires_at;
     sub.queries_used = 0;
-    sub.queries_limit = (duration_months as u64)
-        .checked_mul(1000)
-        .ok_or(ExchangeError::PaymentOverflow)?;
+    sub.queries_limit = queries_limit;
+    sub.has_rated = false;
+    sub.access_key_hash = [0u8; 32];
+    sub.access_key_active = false;
+    sub.access_key_issued_at = 0;
     sub.bump = ctx.bumps.subscription;
 
     ctx.accounts.listing.total_revenue = ctx.accounts.listing.total_revenue
@@ -135,6 +144,13 @@ pub fn handler(ctx: Context<Subscribe>, duration_months: u8) -> Result<()> {
             commission,
         )?;
     }
+
+    emit!(SubscriptionCreated {
+        listing: ctx.accounts.listing.key(),
+        buyer: ctx.accounts.buyer.key(),
+        total_payment,
+        expires_at,
+    });
 
     Ok(())
 }

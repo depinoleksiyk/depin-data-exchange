@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::errors::ExchangeError;
 use crate::constants::*;
+use crate::events::ListingRated;
 
 #[derive(Accounts)]
 pub struct RateListing<'info> {
@@ -12,9 +13,11 @@ pub struct RateListing<'info> {
     )]
     pub listing: Account<'info, DataListing>,
     #[account(
+        mut,
         seeds = [SUBSCRIPTION_SEED, listing.key().as_ref(), buyer.key().as_ref()],
         bump = subscription.bump,
         constraint = subscription.buyer == buyer.key() @ ExchangeError::Unauthorized,
+        constraint = !subscription.has_rated @ ExchangeError::AlreadyRated,
     )]
     pub subscription: Account<'info, DataSubscription>,
     pub buyer: Signer<'info>,
@@ -30,11 +33,22 @@ pub fn handler(ctx: Context<RateListing>, rating: u8) -> Result<()> {
         .checked_mul(20)
         .ok_or(ExchangeError::PaymentOverflow)?;
 
-    listing.quality_score = ((listing.quality_score as u16)
+    let new_score = ((listing.quality_score as u16)
         .checked_add(rating_scaled)
         .ok_or(ExchangeError::PaymentOverflow)?
         .checked_div(2)
         .ok_or(ExchangeError::PaymentOverflow)?) as u8;
+
+    listing.quality_score = new_score;
+
+    ctx.accounts.subscription.has_rated = true;
+
+    emit!(ListingRated {
+        listing: listing.key(),
+        buyer: ctx.accounts.buyer.key(),
+        rating,
+        new_score,
+    });
 
     Ok(())
 }
