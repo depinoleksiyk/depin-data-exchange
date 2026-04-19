@@ -13,10 +13,11 @@ db.pragma('journal_mode = WAL');
 db.exec(`
   CREATE TABLE IF NOT EXISTS used_tx (
     signature TEXT PRIMARY KEY,
-    listing TEXT NOT NULL,
-    buyer TEXT NOT NULL,
+    listing TEXT NOT NULL DEFAULT '',
+    buyer TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL,
-    seen_at INTEGER NOT NULL
+    seen_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'confirmed'
   );
 
   CREATE TABLE IF NOT EXISTS access_keys (
@@ -34,11 +35,50 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_used_tx_seen ON used_tx(seen_at);
 `);
 
-const stmtInsertTx = db.prepare(
-  'INSERT OR IGNORE INTO used_tx (signature, listing, buyer, kind, seen_at) VALUES (?, ?, ?, ?, ?)'
+// Older installs may lack the status column; backfill it before the index
+// that depends on it is created.
+const existingCols = db.prepare("PRAGMA table_info(used_tx)").all().map((c) => c.name);
+if (!existingCols.includes('status')) {
+  db.exec("ALTER TABLE used_tx ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'");
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_used_tx_status ON used_tx(status, seen_at);');
+
+// --- tx reserve / finalize / release ------------------------------------
+
+// Inserts a pending row. Throws (SQLITE_CONSTRAINT) if the signature is
+// already reserved — caller interprets that as "duplicate tx attempt".
+// Explicitly write empty strings into listing/buyer — older DBs may have
+// those columns as NOT NULL without a default, so we never rely on DDL
+// defaults here.
+const stmtReserveTx = db.prepare(
+  "INSERT INTO used_tx (signature, listing, buyer, kind, seen_at, status) VALUES (?, '', '', ?, ?, 'pending')"
 );
-const stmtLookupTx = db.prepare('SELECT seen_at FROM used_tx WHERE signature = ?');
-const stmtSweepTx = db.prepare('DELETE FROM used_tx WHERE seen_at < ?');
+
+// Promotes a pending reservation to confirmed with full metadata.
+const stmtFinalizeTx = db.prepare(
+  "UPDATE used_tx SET listing = ?, buyer = ?, status = 'confirmed' WHERE signature = ? AND status = 'pending'"
+);
+
+// Drops a pending reservation that failed verification.
+const stmtReleaseTx = db.prepare(
+  "DELETE FROM used_tx WHERE signature = ? AND status = 'pending'"
+);
+
+// Lookup — returns whatever row exists (pending or confirmed).
+const stmtLookupTx = db.prepare(
+  'SELECT signature, listing, buyer, kind, seen_at, status FROM used_tx WHERE signature = ?'
+);
+
+// Time-based cleanup for both stuck-pending rows (short TTL) and confirmed
+// rows (long TTL).
+const stmtSweepConfirmedTx = db.prepare(
+  "DELETE FROM used_tx WHERE status = 'confirmed' AND seen_at < ?"
+);
+const stmtSweepPendingTx = db.prepare(
+  "DELETE FROM used_tx WHERE status = 'pending' AND seen_at < ?"
+);
+
+// --- access key cache ---------------------------------------------------
 
 const stmtInsertKey = db.prepare(`
   INSERT OR REPLACE INTO access_keys
@@ -52,15 +92,38 @@ const stmtBumpUsage = db.prepare(
 const stmtRevokeBySubscription = db.prepare('DELETE FROM access_keys WHERE subscription = ?');
 
 module.exports = {
-  markTxUsed(signature, listing, buyer, kind) {
-    return stmtInsertTx.run(signature, listing, buyer, kind, Date.now());
+  /**
+   * Atomically reserve a tx signature as pending. Returns true if we now own
+   * the slot, false if another request already reserved/used it. No async
+   * gap between check and insert — better-sqlite3 is synchronous.
+   */
+  reserveTx(signature, kind) {
+    try {
+      stmtReserveTx.run(signature, kind, Date.now());
+      return true;
+    } catch (err) {
+      if (err && err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') return false;
+      throw err;
+    }
   },
-  isTxUsed(signature) {
-    return !!stmtLookupTx.get(signature);
+  /** Turn a successful reservation into a permanent record. */
+  finalizeTx(signature, listing, buyer) {
+    const res = stmtFinalizeTx.run(listing || '', buyer || '', signature);
+    return res.changes > 0;
   },
-  sweepTx(olderThanMs) {
-    return stmtSweepTx.run(olderThanMs).changes;
+  /** Drop a failed reservation so the signature can be retried. */
+  releaseTx(signature) {
+    return stmtReleaseTx.run(signature).changes;
   },
+  lookupTx(signature) {
+    return stmtLookupTx.get(signature);
+  },
+  sweepTx(confirmedOlderThanMs, pendingOlderThanMs) {
+    const c = stmtSweepConfirmedTx.run(confirmedOlderThanMs).changes;
+    const p = stmtSweepPendingTx.run(pendingOlderThanMs).changes;
+    return { confirmed: c, pending: p };
+  },
+
   storeAccessKey(record) {
     return stmtInsertKey.run(
       record.keyHash,

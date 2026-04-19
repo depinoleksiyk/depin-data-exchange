@@ -128,55 +128,69 @@ app.post('/v1/access-keys/issue', async (req, res) => {
     return problem(res, 400, 'invalid_subscription', 'subscription not a valid pubkey');
   }
 
-  if (db.isTxUsed(txSignature)) {
+  // Atomic reservation closes the TOCTOU window — only one concurrent
+  // request can ever verify this signature.
+  if (!db.reserveTx(txSignature, 'access_key')) {
     return problem(res, 409, 'tx_already_used', 'this tx signature was already consumed');
   }
 
-  const parsed = await chain.fetchTxEvents(txSignature);
-  if (!parsed.ok) {
-    return problem(res, 402, 'tx_unverified', parsed.reason);
-  }
-  const issued = parsed.events.find((e) => e.name === 'AccessKeyIssued');
-  if (!issued) {
-    return problem(res, 422, 'wrong_tx', 'tx did not emit AccessKeyIssued event');
-  }
-  if (issued.data.subscription.toBase58() !== subscription) {
-    return problem(res, 422, 'subscription_mismatch', 'tx event references a different subscription');
-  }
+  try {
+    const parsed = await chain.fetchTxEvents(txSignature);
+    if (!parsed.ok) {
+      db.releaseTx(txSignature);
+      return problem(res, 402, 'tx_unverified', parsed.reason);
+    }
+    const issued = parsed.events.find((e) => e.name === 'AccessKeyIssued');
+    if (!issued) {
+      db.releaseTx(txSignature);
+      return problem(res, 422, 'wrong_tx', 'tx did not emit AccessKeyIssued event');
+    }
+    if (issued.data.subscription.toBase58() !== subscription) {
+      db.releaseTx(txSignature);
+      return problem(res, 422, 'subscription_mismatch', 'tx event references a different subscription');
+    }
 
-  const sub = await chain.fetchSubscription(subPubkey);
-  if (!sub) {
-    return problem(res, 404, 'subscription_not_found', 'on-chain subscription missing');
-  }
+    const sub = await chain.fetchSubscription(subPubkey);
+    if (!sub) {
+      db.releaseTx(txSignature);
+      return problem(res, 404, 'subscription_not_found', 'on-chain subscription missing');
+    }
 
-  const keyHash = hashKey(accessKey);
-  if (!constantTimeEqual(keyHash, Buffer.from(sub.accessKeyHash))) {
-    return problem(res, 422, 'hash_mismatch', 'provided key does not match on-chain hash');
-  }
-  if (!sub.accessKeyActive) {
-    return problem(res, 409, 'key_inactive', 'on-chain record shows key is not active');
-  }
+    const keyHash = hashKey(accessKey);
+    if (!constantTimeEqual(keyHash, Buffer.from(sub.accessKeyHash))) {
+      db.releaseTx(txSignature);
+      return problem(res, 422, 'hash_mismatch', 'provided key does not match on-chain hash');
+    }
+    if (!sub.accessKeyActive) {
+      db.releaseTx(txSignature);
+      return problem(res, 409, 'key_inactive', 'on-chain record shows key is not active');
+    }
 
-  const now = Math.floor(Date.now() / 1000);
-  db.storeAccessKey({
-    keyHash,
-    subscription,
-    listing: sub.listing.toBase58(),
-    buyer: sub.buyer.toBase58(),
-    expAt: Math.min(Number(sub.expiresAt), now + config.accessKeyTtlSec),
-    queriesLimit: Number(sub.queriesLimit),
-    queriesUsed: Number(sub.queriesUsed),
-    issuedAt: now,
-  });
-  db.markTxUsed(txSignature, sub.listing.toBase58(), sub.buyer.toBase58(), 'access_key');
+    const now = Math.floor(Date.now() / 1000);
+    const expAt = Math.min(Number(sub.expiresAt), now + config.accessKeyTtlSec);
+    db.storeAccessKey({
+      keyHash,
+      subscription,
+      listing: sub.listing.toBase58(),
+      buyer: sub.buyer.toBase58(),
+      expAt,
+      queriesLimit: Number(sub.queriesLimit),
+      queriesUsed: Number(sub.queriesUsed),
+      issuedAt: now,
+    });
+    db.finalizeTx(txSignature, sub.listing.toBase58(), sub.buyer.toBase58());
 
-  res.json({
-    ok: true,
-    listing: sub.listing.toBase58(),
-    buyer: sub.buyer.toBase58(),
-    expAt: Math.min(Number(sub.expiresAt), now + config.accessKeyTtlSec),
-    queriesLimit: Number(sub.queriesLimit),
-  });
+    return res.json({
+      ok: true,
+      listing: sub.listing.toBase58(),
+      buyer: sub.buyer.toBase58(),
+      expAt,
+      queriesLimit: Number(sub.queriesLimit),
+    });
+  } catch (err) {
+    db.releaseTx(txSignature);
+    throw err;
+  }
 });
 
 // Fire a query using an access key.
@@ -218,39 +232,47 @@ app.post('/v1/query-tx/:listingId', async (req, res) => {
   const { txSignature, dataType, limit } = req.body || {};
 
   if (!txSignature) return problem(res, 400, 'missing_tx', 'txSignature required');
-  if (db.isTxUsed(txSignature)) {
+
+  if (!db.reserveTx(txSignature, 'pay_per_query')) {
     return problem(res, 409, 'tx_already_used', 'this signature was already consumed');
   }
 
-  const parsed = await chain.fetchTxEvents(txSignature);
-  if (!parsed.ok) {
-    return problem(res, 402, 'tx_unverified', parsed.reason);
-  }
-  const executed = parsed.events.find((e) => e.name === 'QueryExecuted');
-  if (!executed) {
-    return problem(res, 422, 'wrong_tx', 'tx did not emit QueryExecuted event');
-  }
-  if (executed.data.listing.toBase58() !== listingId) {
-    return problem(res, 422, 'listing_mismatch', 'event listing does not match path');
-  }
+  try {
+    const parsed = await chain.fetchTxEvents(txSignature);
+    if (!parsed.ok) {
+      db.releaseTx(txSignature);
+      return problem(res, 402, 'tx_unverified', parsed.reason);
+    }
+    const executed = parsed.events.find((e) => e.name === 'QueryExecuted');
+    if (!executed) {
+      db.releaseTx(txSignature);
+      return problem(res, 422, 'wrong_tx', 'tx did not emit QueryExecuted event');
+    }
+    if (executed.data.listing.toBase58() !== listingId) {
+      db.releaseTx(txSignature);
+      return problem(res, 422, 'listing_mismatch', 'event listing does not match path');
+    }
 
-  db.markTxUsed(
-    txSignature,
-    executed.data.listing.toBase58(),
-    executed.data.buyer.toBase58(),
-    'pay_per_query'
-  );
+    db.finalizeTx(
+      txSignature,
+      executed.data.listing.toBase58(),
+      executed.data.buyer.toBase58()
+    );
 
-  const samples = data.samplesFor(dataType);
-  const rows = limit && Number.isFinite(+limit) ? samples.rows.slice(0, +limit) : samples.rows;
-  res.json({
-    listing: listingId,
-    buyer: executed.data.buyer.toBase58(),
-    dataType: samples.type,
-    rows,
-    count: rows.length,
-    deliveredAt: new Date().toISOString(),
-  });
+    const samples = data.samplesFor(dataType);
+    const rows = limit && Number.isFinite(+limit) ? samples.rows.slice(0, +limit) : samples.rows;
+    return res.json({
+      listing: listingId,
+      buyer: executed.data.buyer.toBase58(),
+      dataType: samples.type,
+      rows,
+      count: rows.length,
+      deliveredAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    db.releaseTx(txSignature);
+    throw err;
+  }
 });
 
 // Serve a random sample + Merkle proof matching the current committed root.
@@ -381,11 +403,19 @@ async function wireProgramStream() {
   }
 }
 
-// sweep stale tx records once an hour
+// Sweep stale tx records once an hour. Confirmed rows age out at the
+// configured replay TTL; pending rows live 60 s — more than enough for the
+// verification round-trip but short enough that crashed handlers don't leave
+// the signature blocked forever.
 setInterval(() => {
-  const cutoff = Date.now() - config.replayTtlSec * 1000;
-  const removed = db.sweepTx(cutoff);
-  if (removed > 0) logger.debug({ removed }, 'replay-store swept');
+  const now = Date.now();
+  const { confirmed, pending } = db.sweepTx(
+    now - config.replayTtlSec * 1000,
+    now - 60 * 1000
+  );
+  if (confirmed > 0 || pending > 0) {
+    logger.debug({ confirmed, pending }, 'replay-store swept');
+  }
 }, 60 * 60 * 1000).unref();
 
 server.listen(config.port, () => {
