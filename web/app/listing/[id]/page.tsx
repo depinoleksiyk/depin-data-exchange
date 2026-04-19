@@ -126,8 +126,43 @@ export default function ListingDetailPage() {
     setTxBusy('subscribe');
     try {
       const program = marketplaceClient(connection, anchorWallet as any);
+
+      // Pre-check: the provider must already have a USDC ATA — their share
+      // of the subscription is paid straight into it. If it doesn't exist,
+      // Anchor's constraint fires with a cryptic error; surface a clear
+      // message instead so the buyer isn't stuck debugging.
+      const providerAta = getAssociatedTokenAddressSync(USDC_MINT, listing.provider);
+      const providerAtaInfo = await connection.getAccountInfo(providerAta);
+      if (!providerAtaInfo) {
+        setToast({
+          tone: 'error',
+          title: 'Provider has no USDC account yet',
+          body: 'The provider needs to create their USDC associated token account before they can be paid. Ping them to run a one-time setup.',
+        });
+        return;
+      }
+
       const preIxs: TransactionInstruction[] = [];
       const buyerAta = await ensureUsdcAta(connection, publicKey, publicKey, preIxs);
+
+      // Quick balance sanity check — fail fast if the buyer has zero USDC,
+      // rather than sending a tx that will revert inside the token program.
+      try {
+        const balance = await connection.getTokenAccountBalance(buyerAta);
+        const required = Number(listing.priceSubscriptionMonthly) * months;
+        const held = Number(balance?.value?.amount || 0);
+        if (held < required) {
+          setToast({
+            tone: 'error',
+            title: 'Not enough mock USDC',
+            body: `Need ${(required / 1_000_000).toFixed(2)} USDC, wallet has ${(held / 1_000_000).toFixed(2)}. Ask the exchange authority for a hand-out.`,
+          });
+          return;
+        }
+      } catch {
+        // Balance fetch failing (e.g. account brand-new) is fine — ATA was
+        // just created in preIxs, so skip the check and let the chain decide.
+      }
 
       const sig = await (program.methods as any)
         .subscribe(months)
@@ -136,7 +171,7 @@ export default function ListingDetailPage() {
           listing: listing.pubkey,
           subscription: subscriptionPda(listing.pubkey, publicKey),
           buyerUsdc: buyerAta,
-          providerUsdc: getAssociatedTokenAddressSync(USDC_MINT, listing.provider),
+          providerUsdc: providerAta,
           treasuryUsdc: TREASURY_ATA,
           provider: providerPda(listing.provider),
           buyer: publicKey,
