@@ -1,8 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  webpack: (config) => {
-    config.resolve.fallback = { ...config.resolve.fallback, crypto: false, stream: false, buffer: false };
-    return config;
+  webpack: (cfg) => {
+    // Solana + wallet-adapter pull in Node-only modules the browser doesn't need.
+    // Shim them out and suppress the logger polyfills that ship with wallet deps.
+    cfg.resolve.fallback = Object.assign({}, cfg.resolve.fallback, {
+      fs: false,
+      net: false,
+      tls: false,
+      crypto: false,
+    });
+    cfg.externals = [...(cfg.externals || []), 'pino-pretty', 'encoding'];
+    return cfg;
   },
   async rewrites() {
     return [
