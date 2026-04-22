@@ -22,7 +22,10 @@ pub struct IssueAccessKey<'info> {
 }
 
 pub fn issue(ctx: Context<IssueAccessKey>, key_hash: [u8; 32]) -> Result<()> {
+    // Reject trivial sentinels (all-zeros, all-ones) that almost certainly
+    // indicate a buggy client rather than a genuine random key hash.
     require!(key_hash != [0u8; 32], ExchangeError::InvalidAccessKeyHash);
+    require!(key_hash != [0xffu8; 32], ExchangeError::InvalidAccessKeyValue);
 
     let clock = Clock::get()?;
     require!(
