@@ -4,7 +4,12 @@
   "description": "A decentralized marketplace for buying and selling verified IoT and DePIN data streams on Solana.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "migrate": "ts-node scripts/migrate-v2.ts",
+    "init": "ts-node scripts/init-v2.ts",
+    "seed": "ts-node scripts/seed-v2.ts",
+    "oracle:key": "ts-node scripts/oracle-keygen.ts",
+    "reseed": "ts-node scripts/reseed-v2.ts",
+    "full-bootstrap": "ts-node scripts/migrate-v2.ts && ts-node scripts/init-v2.ts && ts-node scripts/seed-v2.ts"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +19,11 @@
     "@coral-xyz/anchor": "^0.32.1",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
+    "js-sha3": "^0.9.3",
+    "ts-node": "^10.9.2",
     "typescript": "^6.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
   }
 }

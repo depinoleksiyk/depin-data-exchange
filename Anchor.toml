@@ -5,7 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-exchange = "5mnqN7onSgqy9tBCTJ46N2mGr4Ty68fvCg4HqK5TsdTo"
+exchange = "3gGkKra1uhoDukSkFLCux8j3gkxoMdUjzMfHzLGKkyzk"
 
 [provider]
 cluster = "devnet"
