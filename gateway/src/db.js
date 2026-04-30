@@ -3,6 +3,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 
 const config = require('./config');
+const secretBox = require('./secret-box');
 
 const dir = path.dirname(config.dbPath);
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -33,6 +34,22 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_access_subscription ON access_keys(subscription);
   CREATE INDEX IF NOT EXISTS idx_used_tx_seen ON used_tx(seen_at);
+
+  CREATE TABLE IF NOT EXISTS listing_sources (
+    listing TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    url TEXT NOT NULL,
+    secret TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS source_challenges (
+    nonce TEXT PRIMARY KEY,
+    listing TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_source_challenges_listing ON source_challenges(listing);
 `);
 
 // Older installs may lack the status column; backfill it before the index
@@ -144,5 +161,47 @@ module.exports = {
   },
   revokeSubscription(subscription) {
     return stmtRevokeBySubscription.run(subscription).changes;
+  },
+
+  // --- listing sources -----------------------------------------------
+  saveListingSource({ listing, provider, url, secret }) {
+    return db
+      .prepare(
+        `INSERT INTO listing_sources (listing, provider, url, secret, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(listing) DO UPDATE SET
+           provider = excluded.provider,
+           url = excluded.url,
+           secret = excluded.secret,
+           updated_at = excluded.updated_at`
+      )
+      .run(listing, provider, url, secretBox.encrypt(secret || ''), Date.now());
+  },
+  getListingSource(listing) {
+    const row = db
+      .prepare('SELECT listing, provider, url, secret, updated_at FROM listing_sources WHERE listing = ?')
+      .get(listing);
+    if (!row) return row;
+    return { ...row, secret: secretBox.decrypt(row.secret) };
+  },
+  deleteListingSource(listing) {
+    return db.prepare('DELETE FROM listing_sources WHERE listing = ?').run(listing).changes;
+  },
+
+  // --- one-shot challenges ------------------------------------------
+  saveChallenge({ nonce, listing, provider, expiresAt }) {
+    return db
+      .prepare('INSERT INTO source_challenges (nonce, listing, provider, expires_at) VALUES (?, ?, ?, ?)')
+      .run(nonce, listing, provider, expiresAt);
+  },
+  consumeChallenge(nonce) {
+    const row = db
+      .prepare('SELECT nonce, listing, provider, expires_at FROM source_challenges WHERE nonce = ?')
+      .get(nonce);
+    if (row) db.prepare('DELETE FROM source_challenges WHERE nonce = ?').run(nonce);
+    return row;
+  },
+  sweepChallenges() {
+    return db.prepare('DELETE FROM source_challenges WHERE expires_at < ?').run(Date.now()).changes;
   },
 };

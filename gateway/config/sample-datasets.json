@@ -1,0 +1,50 @@
+{
+  "version": "0.1",
+  "description": "Reference manifest for the four seeded listing categories. The gateway uses these to mock query responses while live providers come online.",
+  "datasets": [
+    {
+      "id": "gps-fleet-eu",
+      "category": "GPS",
+      "title": "Fleet GPS — EU corridor",
+      "provider": "logistx-co",
+      "fields": ["timestamp", "vehicleId", "lat", "lng", "speedKmh", "heading"],
+      "sample": { "timestamp": 1714560000, "vehicleId": "lx-432", "lat": 52.5200, "lng": 13.4050, "speedKmh": 88, "heading": 270 },
+      "cadence": "30s",
+      "rowsPerDay": 120000,
+      "pricePerDayUsdc": 5
+    },
+    {
+      "id": "weather-mountain",
+      "category": "Weather",
+      "title": "Alpine micro-climate stations",
+      "provider": "weatherxm-alps",
+      "fields": ["timestamp", "stationId", "tempC", "humidityPct", "windKmh", "pressureHpa"],
+      "sample": { "timestamp": 1714560000, "stationId": "wxm-zermatt-04", "tempC": -2.3, "humidityPct": 78, "windKmh": 12, "pressureHpa": 781 },
+      "cadence": "60s",
+      "rowsPerDay": 1440,
+      "pricePerDayUsdc": 1
+    },
+    {
+      "id": "air-quality-asia",
+      "category": "AirQuality",
+      "title": "Asia AQI — PM2.5 + ozone",
+      "provider": "purpleair-asia",
+      "fields": ["timestamp", "sensorId", "pm25", "pm10", "o3", "no2", "tempC"],
+      "sample": { "timestamp": 1714560000, "sensorId": "pa-sg-014", "pm25": 23.4, "pm10": 41.2, "o3": 18, "no2": 12, "tempC": 31.0 },
+      "cadence": "60s",
+      "rowsPerDay": 1440,
+      "pricePerDayUsdc": 2
+    },
+    {
+      "id": "camera-streetview",
+      "category": "Camera",
+      "title": "Streetview frames — major cities",
+      "provider": "hivemapper-fleet",
+      "fields": ["timestamp", "captureId", "lat", "lng", "headingDeg", "imageUrl", "resolution"],
+      "sample": { "timestamp": 1714560000, "captureId": "hm-nyc-22813", "lat": 40.7589, "lng": -73.9851, "headingDeg": 90, "imageUrl": "ipfs://...", "resolution": "1920x1080" },
+      "cadence": "1s",
+      "rowsPerDay": 86400,
+      "pricePerDayUsdc": 12
+    }
+  ]
+}
