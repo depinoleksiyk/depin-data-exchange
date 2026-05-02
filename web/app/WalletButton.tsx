@@ -7,7 +7,7 @@ const WalletMultiButton = dynamic(
   { ssr: false }
 );
 
-export function WalletChip() {
+export function WalletButton() {
   return (
     <WalletMultiButton
       style={{

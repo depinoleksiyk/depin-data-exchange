@@ -22,14 +22,14 @@ List a data stream → buyer discovers via search/map → purchases access with 
 | Signal Strength | Helium | Coverage Map | 0.01 USDC/hex |
 | Air Quality | Urban Nodes | PM2.5 Index | 0.005 USDC/reading |
 
-## Marketplace stack
+## Stack
 
 - **Contracts**: Anchor — listing registry, subscription management, USDC payments
 - **Frontend**: Next.js + Mapbox for geographic data visualization
 - **Gateway**: Node.js — data stream proxy and access control
 - **Font**: Sora
 
-## Local setup
+## Development
 
 ```bash
 anchor build && anchor deploy
@@ -39,4 +39,4 @@ cd web && npm install && npm run dev
 
 ## License
 
-The marketplace code (registry contracts, gateway, web app) ships under MIT — see [LICENSE](LICENSE). Data licensing is a separate matter: each listing carries its own provider terms (commercial-use, redistribution, retention), negotiated between buyer and seller at subscription time. The exchange brokers payment and access; it does not relicense the underlying feeds.
+MIT

@@ -12,6 +12,3 @@ pub const MAX_NAME_LEN: usize = 64;
 pub const SECONDS_PER_MONTH: i64 = 30 * 24 * 3600;
 pub const DEFAULT_QUERIES_PER_MONTH: u64 = 1_000;
 pub const MAX_MERKLE_DEPTH: usize = 24; // supports up to 2^24 leaves
-// Renewals must happen within this window past expiry; beyond it the
-// subscription is considered abandoned and the buyer must subscribe afresh.
-pub const RENEW_GRACE_SECS: i64 = 90 * 24 * 3600; // 90 days
