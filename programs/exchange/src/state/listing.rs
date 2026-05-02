@@ -26,10 +26,6 @@ pub struct DataListing {
     pub quality_score: u8,
     pub is_active: bool,
     pub zk_attestation: Option<[u8; 64]>,
-    pub snapshot_root: [u8; 32],
-    pub snapshot_index: u64,
-    pub snapshot_updated_at: i64,
-    pub quality_updated_at: i64,
     pub created_at: i64,
     pub bump: u8,
 }
