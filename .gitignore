@@ -22,3 +22,5 @@ provider-keypair.json
 usdc-mint.json
 gateway/data/
 
+# vercel cli scratch
+.vercel/
