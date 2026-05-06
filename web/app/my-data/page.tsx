@@ -151,8 +151,9 @@ export default function MyDataPage() {
           <div className="panel p-10 text-center">
             <div className="font-display text-lg">No subscriptions yet</div>
             <p className="mt-2 text-sm text-ink-muted">
-              Head to the marketplace and grab any stream that looks useful — you'll see it
-              appear here the moment the transaction confirms.
+              First-time buyers get <span className="font-medium text-forest">10 free trial queries</span> on
+              any GPS or Weather listing — head to the marketplace and the trial credits drop into your
+              quota the moment the subscription transaction confirms.
             </p>
             <Link href="/marketplace" className="btn-primary mt-6 inline-flex">
               Browse marketplace <span className="arrow">→</span>
