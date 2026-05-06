@@ -405,7 +405,7 @@ app.post('/v1/query-tx/:listingId', async (req, res) => {
 // matching USDC into their ATA, subscribe runs as usual. Only signs txs
 // whose shape matches the expected three-instruction template.
 app.post('/v1/pay-with-sol', async (req, res) => {
-  if (!config.mintAuthorityKeypairPath) {
+  if (!config.mintAuthorityKeypairPath && !process.env.GATEWAY_MINT_AUTHORITY_JSON) {
     return problem(res, 503, 'sol_payment_disabled', 'gateway has no mint authority configured');
   }
   const { serializedTx, listing, buyer, durationMonths, solLamports, solPriceUsd, slippageBps } = req.body || {};
