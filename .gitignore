@@ -14,6 +14,7 @@ test-ledger/
 
 .DS_Store
 *.log
+*.tsbuildinfo
 
 # local keypairs + ephemeral state
 oracle-keypair.json
@@ -21,3 +22,5 @@ provider-keypair.json
 usdc-mint.json
 gateway/data/
 
+# vercel cli scratch
+.vercel/
