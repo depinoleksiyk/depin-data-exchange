@@ -39,4 +39,4 @@ cd web && npm install && npm run dev
 
 ## License
 
-MIT
+The marketplace code (registry contracts, gateway, web app) ships under MIT — see [LICENSE](LICENSE). Data licensing is a separate matter: each listing carries its own provider terms (commercial-use, redistribution, retention), negotiated between buyer and seller at subscription time. The exchange brokers payment and access; it does not relicense the underlying feeds.
