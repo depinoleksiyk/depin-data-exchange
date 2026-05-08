@@ -11,5 +11,18 @@ pub struct DataProvider {
     pub avg_quality_score: u8,
     pub is_verified: bool,
     pub devices_registered: u16,
+    pub next_listing_id: u64,
+    pub stake_amount: u64,
+    pub stake_locked_until: i64,
+    pub slash_count: u16,
+    pub low_quality_since: i64,
+    pub bump: u8,
+}
+
+// Escrow PDA that holds staked SOL on behalf of a provider.
+#[account]
+#[derive(InitSpace)]
+pub struct ProviderStakeVault {
+    pub provider: Pubkey,
     pub bump: u8,
 }
