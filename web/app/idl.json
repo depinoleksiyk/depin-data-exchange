@@ -1,5 +1,5 @@
 {
-  "address": "5mnqN7onSgqy9tBCTJ46N2mGr4Ty68fvCg4HqK5TsdTo",
+  "address": "3gGkKra1uhoDukSkFLCux8j3gkxoMdUjzMfHzLGKkyzk",
   "metadata": {
     "name": "exchange",
     "version": "0.1.0",
@@ -7,6 +7,215 @@
     "description": "Marketplace for verified IoT and DePIN data"
   },
   "instructions": [
+    {
+      "name": "close_legacy_exchange",
+      "discriminator": [
+        92,
+        172,
+        49,
+        179,
+        35,
+        78,
+        62,
+        244
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "docs": [
+            "the v1 layout is smaller than the v2 layout."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  97,
+                  116,
+                  97,
+                  95,
+                  101,
+                  120,
+                  99,
+                  104,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_legacy_listing",
+      "discriminator": [
+        23,
+        215,
+        155,
+        17,
+        41,
+        37,
+        149,
+        32
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              },
+              {
+                "kind": "arg",
+                "path": "listing_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider_wallet",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "listing_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "close_legacy_provider",
+      "discriminator": [
+        179,
+        240,
+        93,
+        57,
+        226,
+        83,
+        253,
+        140
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "commit_snapshot",
+      "discriminator": [
+        253,
+        191,
+        36,
+        211,
+        171,
+        197,
+        177,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              },
+              {
+                "kind": "account",
+                "path": "listing.listing_id",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider_wallet",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
     {
       "name": "create_listing",
       "discriminator": [
@@ -93,8 +302,9 @@
                 "path": "provider_wallet"
               },
               {
-                "kind": "arg",
-                "path": "listing_id"
+                "kind": "account",
+                "path": "provider.next_listing_id",
+                "account": "DataProvider"
               }
             ]
           }
@@ -111,32 +321,12 @@
       ],
       "args": [
         {
-          "name": "listing_id",
-          "type": "u64"
-        },
-        {
-          "name": "data_type",
+          "name": "args",
           "type": {
             "defined": {
-              "name": "DataType"
+              "name": "CreateListingArgs"
             }
           }
-        },
-        {
-          "name": "title",
-          "type": "string"
-        },
-        {
-          "name": "description",
-          "type": "string"
-        },
-        {
-          "name": "price_per_query",
-          "type": "u64"
-        },
-        {
-          "name": "price_subscription_monthly",
-          "type": "u64"
         }
       ]
     },
@@ -183,6 +373,9 @@
           "name": "usdc_mint"
         },
         {
+          "name": "quality_oracle"
+        },
+        {
           "name": "authority",
           "writable": true,
           "signer": true
@@ -194,8 +387,104 @@
       ],
       "args": [
         {
-          "name": "commission_bps",
-          "type": "u16"
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "ExchangeInitArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "issue_access_key",
+      "discriminator": [
+        234,
+        114,
+        15,
+        89,
+        124,
+        29,
+        165,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "listing",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.listing_id",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "subscription",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  117,
+                  98,
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "key_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
         }
       ]
     },
@@ -352,6 +641,7 @@
         },
         {
           "name": "subscription",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -423,6 +713,34 @@
                   100,
                   101,
                   114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
                 ]
               },
               {
@@ -607,6 +925,293 @@
       ]
     },
     {
+      "name": "revoke_access_key",
+      "discriminator": [
+        36,
+        251,
+        142,
+        205,
+        232,
+        173,
+        101,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "listing",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.listing_id",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "subscription",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  117,
+                  98,
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyer",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "slash_provider",
+      "discriminator": [
+        169,
+        166,
+        85,
+        0,
+        111,
+        175,
+        215,
+        187
+      ],
+      "accounts": [
+        {
+          "name": "exchange",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  97,
+                  116,
+                  97,
+                  95,
+                  101,
+                  120,
+                  99,
+                  104,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider_wallet"
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "oracle",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "reason",
+          "type": {
+            "defined": {
+              "name": "SlashReason"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "stake_provider",
+      "discriminator": [
+        18,
+        199,
+        109,
+        78,
+        14,
+        224,
+        5,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider_wallet",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "lock_duration",
+          "type": "i64"
+        }
+      ]
+    },
+    {
       "name": "subscribe",
       "discriminator": [
         254,
@@ -766,6 +1371,249 @@
           "type": "u8"
         }
       ]
+    },
+    {
+      "name": "unstake_provider",
+      "discriminator": [
+        3,
+        113,
+        230,
+        51,
+        82,
+        247,
+        160,
+        38
+      ],
+      "accounts": [
+        {
+          "name": "provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "provider_wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider_wallet",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "update_quality",
+      "discriminator": [
+        137,
+        242,
+        209,
+        84,
+        235,
+        241,
+        214,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "exchange",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  97,
+                  116,
+                  97,
+                  95,
+                  101,
+                  120,
+                  99,
+                  104,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.listing_id",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "report",
+          "type": {
+            "defined": {
+              "name": "QualityReport"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "verify_sample",
+      "discriminator": [
+        95,
+        253,
+        140,
+        194,
+        120,
+        245,
+        55,
+        86
+      ],
+      "accounts": [
+        {
+          "name": "listing",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "listing.provider",
+                "account": "DataListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.listing_id",
+                "account": "DataListing"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "MerkleProofArgs"
+            }
+          }
+        }
+      ]
     }
   ],
   "accounts": [
@@ -819,6 +1667,164 @@
         217,
         8,
         3
+      ]
+    },
+    {
+      "name": "ProviderStakeVault",
+      "discriminator": [
+        9,
+        242,
+        168,
+        181,
+        168,
+        153,
+        158,
+        92
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AccessKeyIssued",
+      "discriminator": [
+        180,
+        131,
+        45,
+        255,
+        2,
+        64,
+        27,
+        40
+      ]
+    },
+    {
+      "name": "AccessKeyRevoked",
+      "discriminator": [
+        30,
+        11,
+        214,
+        221,
+        34,
+        255,
+        5,
+        227
+      ]
+    },
+    {
+      "name": "ListingRated",
+      "discriminator": [
+        177,
+        231,
+        150,
+        200,
+        14,
+        103,
+        122,
+        151
+      ]
+    },
+    {
+      "name": "ProviderSlashed",
+      "discriminator": [
+        2,
+        171,
+        201,
+        137,
+        189,
+        61,
+        50,
+        27
+      ]
+    },
+    {
+      "name": "ProviderStaked",
+      "discriminator": [
+        151,
+        129,
+        128,
+        209,
+        68,
+        84,
+        31,
+        248
+      ]
+    },
+    {
+      "name": "ProviderUnstaked",
+      "discriminator": [
+        118,
+        159,
+        47,
+        86,
+        193,
+        154,
+        153,
+        190
+      ]
+    },
+    {
+      "name": "QualityUpdated",
+      "discriminator": [
+        224,
+        66,
+        132,
+        4,
+        226,
+        251,
+        193,
+        150
+      ]
+    },
+    {
+      "name": "QueryExecuted",
+      "discriminator": [
+        13,
+        158,
+        235,
+        231,
+        4,
+        154,
+        37,
+        43
+      ]
+    },
+    {
+      "name": "SnapshotCommitted",
+      "discriminator": [
+        121,
+        143,
+        72,
+        69,
+        68,
+        147,
+        1,
+        75
+      ]
+    },
+    {
+      "name": "SubscriptionCreated",
+      "discriminator": [
+        215,
+        63,
+        169,
+        25,
+        179,
+        200,
+        180,
+        105
+      ]
+    },
+    {
+      "name": "SubscriptionRenewed",
+      "discriminator": [
+        107,
+        68,
+        229,
+        211,
+        63,
+        57,
+        134,
+        149
       ]
     }
   ],
@@ -887,9 +1893,151 @@
       "code": 6012,
       "name": "SubscriptionStillActive",
       "msg": "Subscription is still active, cannot renew"
+    },
+    {
+      "code": 6013,
+      "name": "AlreadyRated",
+      "msg": "This subscription has already submitted a rating"
+    },
+    {
+      "code": 6014,
+      "name": "NotQualityOracle",
+      "msg": "Signer is not the configured quality oracle"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidQualityScore",
+      "msg": "Quality score must be in the 0-100 range"
+    },
+    {
+      "code": 6016,
+      "name": "InsufficientStake",
+      "msg": "Provider has not staked enough lamports to list"
+    },
+    {
+      "code": 6017,
+      "name": "StakeLocked",
+      "msg": "Staked lamports are still locked"
+    },
+    {
+      "code": 6018,
+      "name": "QualityAboveThreshold",
+      "msg": "Provider quality is above the slash threshold"
+    },
+    {
+      "code": 6019,
+      "name": "SlashGraceNotElapsed",
+      "msg": "Provider has not been below threshold long enough to slash"
+    },
+    {
+      "code": 6020,
+      "name": "SlashExceedsStake",
+      "msg": "Slash amount exceeds current stake"
+    },
+    {
+      "code": 6021,
+      "name": "InvalidMerkleProof",
+      "msg": "Merkle proof does not match committed snapshot root"
+    },
+    {
+      "code": 6022,
+      "name": "NoSnapshot",
+      "msg": "No snapshot has been committed for this listing"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidAccessKeyHash",
+      "msg": "Access key hash must be exactly 32 bytes"
+    },
+    {
+      "code": 6024,
+      "name": "NoAccessKey",
+      "msg": "Subscription does not have an active access key"
+    },
+    {
+      "code": 6025,
+      "name": "ZeroStake",
+      "msg": "Stake amount must be greater than zero"
+    },
+    {
+      "code": 6026,
+      "name": "UnstakeExceedsStake",
+      "msg": "Unstake amount exceeds staked amount"
     }
   ],
   "types": [
+    {
+      "name": "AccessKeyIssued",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "subscription",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "issued_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AccessKeyRevoked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "subscription",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateListingArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "data_type",
+            "type": {
+              "defined": {
+                "name": "DataType"
+              }
+            }
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          },
+          {
+            "name": "price_per_query",
+            "type": "u64"
+          },
+          {
+            "name": "price_subscription_monthly",
+            "type": "u64"
+          }
+        ]
+      }
+    },
     {
       "name": "DataExchange",
       "type": {
@@ -901,6 +2049,10 @@
           },
           {
             "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "quality_oracle",
             "type": "pubkey"
           },
           {
@@ -918,6 +2070,18 @@
           {
             "name": "usdc_mint",
             "type": "pubkey"
+          },
+          {
+            "name": "slash_threshold",
+            "type": "u8"
+          },
+          {
+            "name": "slash_grace_period",
+            "type": "i64"
+          },
+          {
+            "name": "min_stake_lamports",
+            "type": "u64"
           },
           {
             "name": "bump",
@@ -991,6 +2155,27 @@
             }
           },
           {
+            "name": "snapshot_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "snapshot_index",
+            "type": "u64"
+          },
+          {
+            "name": "snapshot_updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "quality_updated_at",
+            "type": "i64"
+          },
+          {
             "name": "created_at",
             "type": "i64"
           },
@@ -1035,6 +2220,26 @@
             "type": "u16"
           },
           {
+            "name": "next_listing_id",
+            "type": "u64"
+          },
+          {
+            "name": "stake_amount",
+            "type": "u64"
+          },
+          {
+            "name": "stake_locked_until",
+            "type": "i64"
+          },
+          {
+            "name": "slash_count",
+            "type": "u16"
+          },
+          {
+            "name": "low_quality_since",
+            "type": "i64"
+          },
+          {
             "name": "bump",
             "type": "u8"
           }
@@ -1071,6 +2276,27 @@
             "type": "u64"
           },
           {
+            "name": "has_rated",
+            "type": "bool"
+          },
+          {
+            "name": "access_key_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "access_key_active",
+            "type": "bool"
+          },
+          {
+            "name": "access_key_issued_at",
+            "type": "i64"
+          },
+          {
             "name": "bump",
             "type": "u8"
           }
@@ -1093,6 +2319,364 @@
           },
           {
             "name": "Camera"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExchangeInitArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "commission_bps",
+            "type": "u16"
+          },
+          {
+            "name": "slash_threshold",
+            "type": "u8"
+          },
+          {
+            "name": "slash_grace_period",
+            "type": "i64"
+          },
+          {
+            "name": "min_stake_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ListingRated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "listing",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "rating",
+            "type": "u8"
+          },
+          {
+            "name": "new_score",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MerkleProofArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "leaf",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "path",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "ProofNode"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProofNode",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "is_left",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProviderSlashed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "provider",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "reason",
+            "type": {
+              "defined": {
+                "name": "SlashReason"
+              }
+            }
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProviderStakeVault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "provider",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProviderStaked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "provider",
+            "type": "pubkey"
+          },
+          {
+            "name": "added",
+            "type": "u64"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "locked_until",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProviderUnstaked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "provider",
+            "type": "pubkey"
+          },
+          {
+            "name": "withdrawn",
+            "type": "u64"
+          },
+          {
+            "name": "remaining",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QualityReport",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "freshness",
+            "type": "u8"
+          },
+          {
+            "name": "accuracy",
+            "type": "u8"
+          },
+          {
+            "name": "completeness",
+            "type": "u8"
+          },
+          {
+            "name": "overall",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QualityUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "listing",
+            "type": "pubkey"
+          },
+          {
+            "name": "score",
+            "type": "u8"
+          },
+          {
+            "name": "freshness",
+            "type": "u8"
+          },
+          {
+            "name": "accuracy",
+            "type": "u8"
+          },
+          {
+            "name": "completeness",
+            "type": "u8"
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueryExecuted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "listing",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "queries_used",
+            "type": "u64"
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SlashReason",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "PersistentLowQuality"
+          },
+          {
+            "name": "FailedAttestation"
+          },
+          {
+            "name": "ManualAuthority"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SnapshotCommitted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "listing",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u64"
+          },
+          {
+            "name": "root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SubscriptionCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "listing",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_payment",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SubscriptionRenewed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "listing",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_payment",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
           }
         ]
       }
