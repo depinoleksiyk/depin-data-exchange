@@ -34,30 +34,11 @@ const solPrice = require('./sol-price');
 
 const SLIPPAGE_BPS_MAX = 300; // cap the slippage buyers can claim to 3 %
 
-// Forgiving secret-key parser — lets Railway dashboards paste the JSON array
-// with or without enclosing brackets without breaking the gateway boot.
-function parseSecret(raw) {
-  const trimmed = String(raw).trim();
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (Array.isArray(parsed)) return parsed;
-  } catch (_) { /* fall through */ }
-  const inner = trimmed.replace(/^[\[\(]+/, '').replace(/[\]\)]+$/, '');
-  return inner.split(/[,\s]+/).filter(Boolean).map((n) => Number(n));
-}
-
 let cachedKeypair = null;
 function mintAuthority() {
   if (cachedKeypair) return cachedKeypair;
-  // Inline JSON env wins over filesystem path — Railway containers have no
-  // host-level keypair files, so we ship the bytes via env.
-  const inline = process.env.GATEWAY_MINT_AUTHORITY_JSON;
-  if (inline && inline.trim()) {
-    cachedKeypair = Keypair.fromSecretKey(Uint8Array.from(parseSecret(inline)));
-    return cachedKeypair;
-  }
   if (!config.mintAuthorityKeypairPath) {
-    throw new Error('GATEWAY_MINT_AUTHORITY_JSON or GATEWAY_MINT_AUTHORITY_KEYPAIR_PATH not configured');
+    throw new Error('GATEWAY_MINT_AUTHORITY_KEYPAIR_PATH not configured');
   }
   const raw = JSON.parse(fs.readFileSync(config.mintAuthorityKeypairPath, 'utf8'));
   cachedKeypair = Keypair.fromSecretKey(Uint8Array.from(raw));

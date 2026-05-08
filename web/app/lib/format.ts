@@ -54,17 +54,6 @@ export function qualityLabel(score: number): { label: string; tone: 'good' | 'wa
   return { label: 'At risk', tone: 'bad' };
 }
 
-// Stale data detector — last_update_ts older than 24h flags the listing as
-// not currently flowing. Buyers should pause subscription before stale data
-// rolls into their downstream models.
-export function isStale(lastUpdateUnix: number | bigint | null | undefined): boolean {
-  if (lastUpdateUnix === null || lastUpdateUnix === undefined) return true;
-  const t = Number(lastUpdateUnix);
-  if (!Number.isFinite(t) || t <= 0) return true;
-  const ageSeconds = Math.floor(Date.now() / 1000) - t;
-  return ageSeconds > 24 * 3600;
-}
-
 export function bytesToHex(bytes: Uint8Array | number[] | undefined): string {
   if (!bytes) return '';
   const arr = Array.isArray(bytes) ? bytes : Array.from(bytes);
