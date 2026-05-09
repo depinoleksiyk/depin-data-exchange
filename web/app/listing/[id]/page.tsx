@@ -3,8 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
+import {
+  TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
+  createMintToInstruction,
+  getAssociatedTokenAddressSync,
+} from '@solana/spl-token';
 import { useAnchorWallet, useConnection, useWallet } from '@solana/wallet-adapter-react';
 
 import {
@@ -38,7 +43,9 @@ import { StatTile } from '../../components/StatTile';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import { Reveal } from '../../components/Reveal';
 import { CountUp } from '../../components/CountUp';
-import { authedQuery, issueAccessKey, samplePreview, sampleProof } from '../../lib/gateway';
+import { authedQuery, getListingSource, issueAccessKey, payWithSol, samplePreview, sampleProof } from '../../lib/gateway';
+import { formatSol, usdcRawToLamports, useSolPrice } from '../../lib/sol-price';
+import { clearAccessKey, loadAccessKey, saveAccessKey } from '../../lib/access-key-store';
 
 const MONTH_OPTIONS = [1, 3, 6, 12];
 
@@ -65,14 +72,27 @@ export default function ListingDetailPage() {
   const [notFound, setNotFound] = useState(false);
 
   const [months, setMonths] = useState<number>(1);
-  const [txBusy, setTxBusy] = useState<null | 'subscribe' | 'issueKey' | 'query'>(null);
+  const [txBusy, setTxBusy] = useState<null | 'subscribe' | 'subscribeSol' | 'issueKey' | 'query'>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const { price: solPrice, refresh: refreshSolPrice } = useSolPrice();
 
-  const [accessKey, setAccessKey] = useState<string | null>(null);
+  const [accessKey, _setAccessKey] = useState<string | null>(null);
+  const setAccessKey = useCallback(
+    (key: string | null) => {
+      _setAccessKey(key);
+      if (subscription) {
+        const subKey = subscription.pubkey.toBase58();
+        if (key) saveAccessKey(subKey, key);
+        else clearAccessKey(subKey);
+      }
+    },
+    [subscription]
+  );
   const [queryType, setQueryType] = useState<string>('gps');
   const [queryResult, setQueryResult] = useState<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [proof, setProof] = useState<any>(null);
+  const [sourceInfo, setSourceInfo] = useState<{ bound: boolean; url?: string; updatedAt?: number } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!listingPubkey) return;
@@ -94,6 +114,10 @@ export default function ListingDetailPage() {
       if (publicKey) {
         const sub = await fetchSubscriptionView(program, listingPubkey, publicKey);
         setSubscription(sub);
+        if (sub?.accessKeyActive) {
+          const cached = loadAccessKey(sub.pubkey.toBase58());
+          if (cached) _setAccessKey(cached);
+        }
       } else {
         setSubscription(null);
       }
@@ -110,8 +134,10 @@ export default function ListingDetailPage() {
 
   useEffect(() => {
     if (!listing) return;
-    samplePreview(listing.pubkey.toBase58(), listing.dataType).then(setPreview).catch(() => setPreview(null));
-    sampleProof(listing.pubkey.toBase58(), listing.dataType).then(setProof).catch(() => setProof(null));
+    const pub = listing.pubkey.toBase58();
+    samplePreview(pub, listing.dataType).then(setPreview).catch(() => setPreview(null));
+    sampleProof(pub, listing.dataType).then(setProof).catch(() => setProof(null));
+    getListingSource(pub).then(setSourceInfo).catch(() => setSourceInfo(null));
   }, [listing]);
 
   const meta = listing ? DATA_TYPE_META[listing.dataType] : null;
@@ -200,6 +226,116 @@ export default function ListingDetailPage() {
       setTxBusy(null);
     }
   }, [anchorWallet, listing, publicKey, connection, months, refresh]);
+
+  const solQuote = useMemo(() => {
+    if (!listing || !exchange || !solPrice) return null;
+    const totalUsdc = listing.priceSubscriptionMonthly * BigInt(months);
+    const lamports = usdcRawToLamports(totalUsdc, solPrice.usd, 100);
+    return { totalUsdc, lamports, solPriceUsd: solPrice.usd, slippageBps: 100, updatedAt: solPrice.updatedAt, source: solPrice.source };
+  }, [listing, exchange, solPrice, months]);
+
+  const handleSubscribeWithSol = useCallback(async () => {
+    if (!anchorWallet || !listing || !publicKey || !solQuote) return;
+    setTxBusy('subscribeSol');
+    try {
+      // Provider ATA must exist — commission goes to treasury ATA which is
+      // also known fixed.
+      const providerAta = getAssociatedTokenAddressSync(USDC_MINT, listing.provider);
+      const providerAtaInfo = await connection.getAccountInfo(providerAta);
+      if (!providerAtaInfo) {
+        setToast({
+          tone: 'error',
+          title: 'Provider has no USDC account yet',
+          body: 'The provider needs to create their USDC associated token account before they can be paid.',
+        });
+        return;
+      }
+
+      // Build the composite tx. Gateway will sanity-check every ix then add
+      // its mint-authority signature before submitting.
+      const program = marketplaceClient(connection, anchorWallet as any);
+      const buyerAta = getAssociatedTokenAddressSync(USDC_MINT, publicKey);
+      const buyerAtaInfo = await connection.getAccountInfo(buyerAta);
+      const ixs: TransactionInstruction[] = [];
+
+      if (!buyerAtaInfo) {
+        ixs.push(
+          createAssociatedTokenAccountInstruction(publicKey, buyerAta, publicKey, USDC_MINT)
+        );
+      }
+
+      ixs.push(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: EXCHANGE_AUTHORITY,
+          lamports: Number(solQuote.lamports),
+        })
+      );
+      ixs.push(
+        createMintToInstruction(
+          USDC_MINT,
+          buyerAta,
+          EXCHANGE_AUTHORITY,
+          Number(solQuote.totalUsdc)
+        )
+      );
+
+      const subscribeIx = await (program.methods as any)
+        .subscribe(months)
+        .accountsPartial({
+          exchange: exchangePda(),
+          listing: listing.pubkey,
+          subscription: subscriptionPda(listing.pubkey, publicKey),
+          buyerUsdc: buyerAta,
+          providerUsdc: providerAta,
+          treasuryUsdc: TREASURY_ATA,
+          provider: providerPda(listing.provider),
+          buyer: publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction();
+      ixs.push(subscribeIx);
+
+      const tx = new Transaction();
+      tx.add(...ixs);
+      tx.feePayer = publicKey;
+      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+
+      // Buyer signs first; gateway's partialSign fills in the mint authority
+      // slot. requireAllSignatures:false keeps serialize happy while the
+      // authority signature is still missing.
+      const signed = await anchorWallet.signTransaction(tx);
+      const serialized = signed.serialize({ requireAllSignatures: false }).toString('base64');
+
+      const ack = await payWithSol({
+        serializedTx: serialized,
+        listing: listing.pubkey.toBase58(),
+        buyer: publicKey.toBase58(),
+        durationMonths: months,
+        solLamports: solQuote.lamports.toString(),
+        solPriceUsd: solQuote.solPriceUsd,
+        slippageBps: solQuote.slippageBps,
+      });
+
+      setToast({
+        tone: 'success',
+        title: 'Paid in SOL',
+        body: `${formatSol(solQuote.lamports)} SOL ≈ ${formatUsdc(fromUsdcRaw(solQuote.totalUsdc))} USDC at $${solQuote.solPriceUsd.toFixed(2)}/SOL.`,
+        link: { href: `https://explorer.solana.com/tx/${ack.signature}?cluster=devnet`, label: 'View on Explorer' },
+      });
+      refresh();
+    } catch (err: any) {
+      console.error(err);
+      setToast({
+        tone: 'error',
+        title: 'SOL payment failed',
+        body: err?.message?.slice(0, 140) || 'Unknown error',
+      });
+    } finally {
+      setTxBusy(null);
+    }
+  }, [anchorWallet, listing, publicKey, connection, months, solQuote, refresh]);
 
   const handleIssueKey = useCallback(async () => {
     if (!anchorWallet || !listing || !publicKey || !subscription) return;
@@ -327,6 +463,14 @@ export default function ListingDetailPage() {
                 oracle {relativeTime(listing.qualityUpdatedAt)}
               </span>
             )}
+            {sourceInfo?.bound ? (
+              <span className="chip bg-forest-soft text-forest-dark" title={sourceInfo.url}>
+                <span className="h-1.5 w-1.5 rounded-full bg-forest" />
+                live upstream
+              </span>
+            ) : sourceInfo !== null ? (
+              <span className="chip bg-earth-100 text-ink-muted">demo samples</span>
+            ) : null}
           </div>
           <h1 className="mt-3 font-display text-[32px] md:text-[40px] tracking-ultra leading-tight">
             {listing.title}
@@ -437,6 +581,16 @@ export default function ListingDetailPage() {
                   </pre>
                 )}
               </section>
+            </Reveal>
+          )}
+
+          {accessKey && listing && (
+            <Reveal>
+              <UsageSnippets
+                listingPubkey={listing.pubkey.toBase58()}
+                dataType={listing.dataType}
+                accessKey={accessKey}
+              />
             </Reveal>
           )}
 
@@ -564,8 +718,45 @@ export default function ListingDetailPage() {
                     {txBusy === 'subscribe' ? 'Signing…' : <>Pay & subscribe for {months}mo <span className="arrow">→</span></>}
                   </button>
 
+                  {/* Pay-with-SOL alternative — gateway co-signs a tx that
+                      bundles SystemTransfer(SOL) + MintTo(USDC) + subscribe,
+                      so the buyer never needs to hold mock USDC. */}
+                  <div className="relative mt-4 border-t border-earth-100 pt-4">
+                    <div className="flex items-center justify-between text-[11px] text-ink-soft">
+                      <span className="uppercase tracking-wide">Pay in SOL</span>
+                      <button
+                        type="button"
+                        onClick={refreshSolPrice}
+                        className="font-mono hover:text-ink transition-colors"
+                        title="Refresh SOL/USD"
+                      >
+                        {solPrice ? `$${solPrice.usd.toFixed(2)}` : '…'} / SOL
+                        {solPrice?.source === 'stale' && <span className="ml-1 text-clay">stale</span>}
+                        {!solPrice && <span className="ml-1 text-clay">offline</span>}
+                      </button>
+                    </div>
+                    {solQuote ? (
+                      <div className="mt-1 flex items-baseline justify-between mono text-[12px]">
+                        <span className="text-ink tabular">{formatSol(solQuote.lamports)} SOL</span>
+                        <span className="text-ink-soft">≈ {formatUsdc(fromUsdcRaw(solQuote.totalUsdc))} USDC</span>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-[12px] text-ink-soft">fetching live quote…</div>
+                    )}
+                    <button
+                      onClick={handleSubscribeWithSol}
+                      disabled={txBusy !== null || !solQuote}
+                      className="btn-secondary w-full mt-3 justify-center"
+                    >
+                      {txBusy === 'subscribeSol' ? 'Paying in SOL…' : <>Pay {solQuote ? `${formatSol(solQuote.lamports, 4)} SOL` : '…'} <span className="arrow">◎</span></>}
+                    </button>
+                    <p className="mt-2 text-[10.5px] text-ink-soft leading-relaxed">
+                      One click: signs a bundle of SOL transfer + USDC mint-to + subscribe. Rate from CoinGecko, 1% slippage buffer, gateway co-signs the mint step.
+                    </p>
+                  </div>
+
                   <p className="relative mt-3 text-[11px] text-ink-soft leading-relaxed">
-                    Need devnet USDC? Ask the exchange authority (
+                    Prefer USDC? Ask the exchange authority (
                     <a
                       className="link-plain"
                       href={`https://explorer.solana.com/address/${EXCHANGE_AUTHORITY.toBase58()}?cluster=devnet`}
@@ -604,6 +795,162 @@ export default function ListingDetailPage() {
       </div>
 
       <Toast message={toast} onDismiss={() => setToast(null)} />
+    </div>
+  );
+}
+
+type SnippetLang = 'curl' | 'js' | 'python';
+
+function UsageSnippets({
+  listingPubkey,
+  dataType,
+  accessKey,
+}: {
+  listingPubkey: string;
+  dataType: string;
+  accessKey: string;
+}) {
+  const [lang, setLang] = useState<SnippetLang>('curl');
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const gatewayBase =
+    typeof window === 'undefined' ? 'http://localhost:4001' : `${window.location.origin}/api`;
+  const dataTypeLower = dataType.toLowerCase();
+
+  const snippets: Record<SnippetLang, string> = {
+    curl: `curl -X POST ${gatewayBase}/v1/query/${listingPubkey} \\
+  -H "Authorization: Bearer ${accessKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"dataType":"${dataTypeLower}","limit":5}'`,
+    js: `const r = await fetch(
+  '${gatewayBase}/v1/query/${listingPubkey}',
+  {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ${accessKey}',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ dataType: '${dataTypeLower}', limit: 5 }),
+  },
+);
+const data = await r.json();
+console.log(data.rows);`,
+    python: `import httpx
+
+r = httpx.post(
+    "${gatewayBase}/v1/query/${listingPubkey}",
+    headers={"Authorization": "Bearer ${accessKey}"},
+    json={"dataType": "${dataTypeLower}", "limit": 5},
+)
+print(r.json()["rows"])`,
+  };
+
+  const copy = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      setTimeout(() => setCopied((c) => (c === id ? null : c)), 1400);
+    } catch {
+      /* clipboard not available */
+    }
+  };
+
+  return (
+    <section className="panel p-6">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <div className="text-xs uppercase tracking-[0.16em] text-ink-soft">How to pull data</div>
+          <div className="font-display text-lg mt-1">Drop in and go</div>
+        </div>
+        <div className="flex items-center gap-0.5 bg-parchment/70 rounded-md p-0.5">
+          {(['curl', 'js', 'python'] as SnippetLang[]).map((l) => (
+            <button
+              key={l}
+              onClick={() => setLang(l)}
+              className={`px-2.5 py-1 text-[11px] font-medium rounded transition-all ${
+                lang === l ? 'bg-ink text-cream' : 'text-ink-muted hover:text-ink'
+              }`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <p className="text-[13px] text-ink-muted leading-relaxed mb-3">
+        Your access key behaves like an API token. Send it as a{' '}
+        <code className="font-mono text-[12px] bg-earth-50 px-1 py-0.5 rounded">Authorization: Bearer …</code>{' '}
+        header and the gateway streams rows without another wallet signature.
+      </p>
+
+      <div className="relative group">
+        <pre className="font-mono text-[12px] bg-ink text-cream rounded-lg p-4 pr-12 overflow-x-auto leading-relaxed whitespace-pre">
+          {snippets[lang]}
+        </pre>
+        <button
+          onClick={() => copy('snippet', snippets[lang])}
+          className="absolute top-3 right-3 px-2 py-1 text-[10px] uppercase tracking-widest bg-cream/10 text-cream/80 hover:bg-cream hover:text-ink rounded transition-all"
+        >
+          {copied === 'snippet' ? 'copied' : 'copy'}
+        </button>
+      </div>
+
+      <div className="mt-4 grid sm:grid-cols-2 gap-3 text-[12px]">
+        <InfoRow
+          label="Bearer token"
+          value={accessKey}
+          onCopy={() => copy('key', accessKey)}
+          copied={copied === 'key'}
+        />
+        <InfoRow
+          label="Listing id"
+          value={listingPubkey}
+          onCopy={() => copy('id', listingPubkey)}
+          copied={copied === 'id'}
+        />
+      </div>
+
+      <ul className="mt-4 space-y-1.5 text-[12px] text-ink-muted">
+        <li>
+          <span className="inline-block w-4 text-forest">•</span>
+          <code className="font-mono text-[11px]">limit</code> accepts 1–5 rows per call.
+        </li>
+        <li>
+          <span className="inline-block w-4 text-forest">•</span>
+          1 000 queries/month are baked into each subscription.
+        </li>
+        <li>
+          <span className="inline-block w-4 text-forest">•</span>
+          Lost the key? Hit <em>Re-issue access key</em> on the right — only costs a signature.
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+  onCopy,
+  copied,
+}: {
+  label: string;
+  value: string;
+  onCopy: () => void;
+  copied: boolean;
+}) {
+  return (
+    <div className="bg-parchment rounded-md px-3 py-2 flex items-center justify-between gap-2">
+      <div className="min-w-0">
+        <div className="text-[10px] uppercase tracking-wider text-ink-soft">{label}</div>
+        <div className="font-mono text-[11px] text-ink truncate">{value}</div>
+      </div>
+      <button
+        onClick={onCopy}
+        className="text-[10px] uppercase tracking-wider text-ink-soft hover:text-forest transition-colors shrink-0"
+      >
+        {copied ? 'copied' : 'copy'}
+      </button>
     </div>
   );
 }

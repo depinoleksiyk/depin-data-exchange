@@ -1,6 +1,6 @@
 import './globals.css';
 import { Metadata } from 'next';
-import { SolanaProviders } from './providers';
+import { SolanaProviders } from './wallet-shell';
 import { Nav } from './components/Nav';
 import { Footer } from './components/Footer';
 

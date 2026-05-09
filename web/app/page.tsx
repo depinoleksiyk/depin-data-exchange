@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { CoverageMap } from './components/CoverageMap';
-import { LiveFeed } from './components/LiveFeed';
+import { SatelliteFeed } from './components/SatelliteFeed';
 import { Reveal } from './components/Reveal';
 import { CountUp } from './components/CountUp';
 
@@ -124,7 +124,7 @@ export default function LandingPage() {
                   { x: 780, y: 310, label: 'Singapore', tone: 'sunflower' },
                 ]}
               />
-              <LiveFeed />
+              <SatelliteFeed />
             </div>
           </div>
         </div>

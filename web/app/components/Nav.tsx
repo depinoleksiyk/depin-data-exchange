@@ -2,16 +2,25 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useWallet } from '@solana/wallet-adapter-react';
 import { WalletChip } from '../WalletChip';
 
-const TABS = [
+const STATIC_TABS = [
   { href: '/marketplace', label: 'Marketplace', match: (p: string) => p.startsWith('/marketplace') || p.startsWith('/listing') },
   { href: '/provider', label: 'For Providers', match: (p: string) => p.startsWith('/provider') },
   { href: '/docs', label: 'Docs', match: (p: string) => p.startsWith('/docs') },
 ];
 
+const MY_DATA_TAB = {
+  href: '/my-data',
+  label: 'My Data',
+  match: (p: string) => p.startsWith('/my-data'),
+};
+
 export function Nav() {
   const pathname = usePathname() || '/';
+  const { publicKey } = useWallet();
+  const TABS = publicKey ? [MY_DATA_TAB, ...STATIC_TABS] : STATIC_TABS;
 
   return (
     <header className="border-b border-earth-100 bg-cream/80 backdrop-blur-sm sticky top-0 z-30">
