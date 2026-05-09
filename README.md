@@ -22,14 +22,14 @@ List a data stream → buyer discovers via search/map → purchases access with 
 | Signal Strength | Helium | Coverage Map | 0.01 USDC/hex |
 | Air Quality | Urban Nodes | PM2.5 Index | 0.005 USDC/reading |
 
-## Marketplace stack
+## Stack
 
 - **Contracts**: Anchor — listing registry, subscription management, USDC payments
 - **Frontend**: Next.js + Mapbox for geographic data visualization
 - **Gateway**: Node.js — data stream proxy and access control
 - **Font**: Sora
 
-## Local setup
+## Development
 
 ```bash
 anchor build && anchor deploy

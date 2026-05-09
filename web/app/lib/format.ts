@@ -24,10 +24,8 @@ export function shortAddress(pubkey: string | undefined | null, chars = 4): stri
 }
 
 export function relativeTime(unixSeconds: number | bigint): string {
-  const t = Number(unixSeconds);
-  // Zero / never-set timestamps show "never" instead of "56y ago"
-  if (!Number.isFinite(t) || t <= 0) return 'never';
   const now = Math.floor(Date.now() / 1000);
+  const t = Number(unixSeconds);
   const delta = t - now;
   const abs = Math.abs(delta);
   const units: Array<[string, number]> = [
@@ -52,17 +50,6 @@ export function qualityLabel(score: number): { label: string; tone: 'good' | 'wa
   if (score >= 65) return { label: 'Reliable', tone: 'good' };
   if (score >= 45) return { label: 'Mixed', tone: 'warn' };
   return { label: 'At risk', tone: 'bad' };
-}
-
-// Stale data detector — last_update_ts older than 24h flags the listing as
-// not currently flowing. Buyers should pause subscription before stale data
-// rolls into their downstream models.
-export function isStale(lastUpdateUnix: number | bigint | null | undefined): boolean {
-  if (lastUpdateUnix === null || lastUpdateUnix === undefined) return true;
-  const t = Number(lastUpdateUnix);
-  if (!Number.isFinite(t) || t <= 0) return true;
-  const ageSeconds = Math.floor(Date.now() / 1000) - t;
-  return ageSeconds > 24 * 3600;
 }
 
 export function bytesToHex(bytes: Uint8Array | number[] | undefined): string {

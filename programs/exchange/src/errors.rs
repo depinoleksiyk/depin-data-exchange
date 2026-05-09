@@ -58,10 +58,4 @@ pub enum ExchangeError {
     ZeroStake,
     #[msg("Unstake amount exceeds staked amount")]
     UnstakeExceedsStake,
-    #[msg("Subscription has been abandoned past the renewal window")]
-    SubscriptionAbandoned,
-    #[msg("Provider price exceeds the protocol cap")]
-    PriceTooHigh,
-    #[msg("Access key hash is not a valid non-trivial value")]
-    InvalidAccessKeyValue,
 }
