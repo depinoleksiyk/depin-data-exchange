@@ -24,10 +24,8 @@ export function shortAddress(pubkey: string | undefined | null, chars = 4): stri
 }
 
 export function relativeTime(unixSeconds: number | bigint): string {
-  const t = Number(unixSeconds);
-  // Zero / never-set timestamps show "never" instead of "56y ago"
-  if (!Number.isFinite(t) || t <= 0) return 'never';
   const now = Math.floor(Date.now() / 1000);
+  const t = Number(unixSeconds);
   const delta = t - now;
   const abs = Math.abs(delta);
   const units: Array<[string, number]> = [

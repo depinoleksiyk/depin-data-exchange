@@ -2,13 +2,6 @@ use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::errors::ExchangeError;
 use crate::constants::*;
-use crate::events::ListingCreated;
-
-// Cap prices so a misconfigured provider can't brick subscribe with a
-// u64::MAX price that would overflow checked_mul mid-flow.
-// 1 million USDC (6 decimals) per query or month is well above any plausible
-// real price but far below the overflow threshold.
-const MAX_PRICE_USDC_RAW: u64 = 1_000_000 * 1_000_000;
 
 #[derive(Accounts)]
 pub struct CreateListing<'info> {
@@ -50,14 +43,6 @@ pub struct CreateListingArgs {
 pub fn handler(ctx: Context<CreateListing>, args: CreateListingArgs) -> Result<()> {
     require!(args.title.len() <= MAX_TITLE_LEN, ExchangeError::TitleTooLong);
     require!(args.description.len() <= MAX_DESCRIPTION_LEN, ExchangeError::DescriptionTooLong);
-    require!(
-        args.price_per_query <= MAX_PRICE_USDC_RAW,
-        ExchangeError::PriceTooHigh,
-    );
-    require!(
-        args.price_subscription_monthly <= MAX_PRICE_USDC_RAW,
-        ExchangeError::PriceTooHigh,
-    );
 
     let clock = Clock::get()?;
     let listing_id = ctx.accounts.provider.next_listing_id;
@@ -72,10 +57,7 @@ pub fn handler(ctx: Context<CreateListing>, args: CreateListingArgs) -> Result<(
     listing.price_subscription_monthly = args.price_subscription_monthly;
     listing.total_queries = 0;
     listing.total_revenue = 0;
-    // Start at 100 so a fresh listing is never instantly slashable, even if
-    // the configured slash_threshold is close to 50. Quality decays as real
-    // reports / ratings come in.
-    listing.quality_score = 100;
+    listing.quality_score = 50;
     listing.is_active = true;
     listing.zk_attestation = None;
     listing.snapshot_root = [0u8; 32];
@@ -96,15 +78,6 @@ pub fn handler(ctx: Context<CreateListing>, args: CreateListingArgs) -> Result<(
     p.next_listing_id = p.next_listing_id
         .checked_add(1)
         .ok_or(ExchangeError::PaymentOverflow)?;
-
-    emit!(ListingCreated {
-        listing: ctx.accounts.listing.key(),
-        provider: ctx.accounts.listing.provider,
-        listing_id,
-        price_per_query: ctx.accounts.listing.price_per_query,
-        price_subscription_monthly: ctx.accounts.listing.price_subscription_monthly,
-        at: clock.unix_timestamp,
-    });
 
     Ok(())
 }

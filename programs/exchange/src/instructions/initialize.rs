@@ -29,16 +29,8 @@ pub struct ExchangeInitArgs {
     pub min_stake_lamports: u64,
 }
 
-// 20 % is a generous upper bound for a marketplace commission; higher values
-// are almost certainly a misconfiguration and would hurt buyer UX enough
-// that nobody would subscribe anyway.
-const MAX_COMMISSION_BPS: u16 = 2_000;
-
 pub fn handler(ctx: Context<Initialize>, args: ExchangeInitArgs) -> Result<()> {
-    require!(
-        args.commission_bps <= MAX_COMMISSION_BPS,
-        ExchangeError::InvalidCommission,
-    );
+    require!(args.commission_bps < 10_000, ExchangeError::InvalidCommission);
     require!(args.slash_threshold <= 100, ExchangeError::InvalidQualityScore);
 
     let exchange = &mut ctx.accounts.exchange;

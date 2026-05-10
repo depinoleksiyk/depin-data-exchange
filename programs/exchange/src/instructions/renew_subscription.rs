@@ -64,13 +64,6 @@ pub fn handler(ctx: Context<RenewSubscription>, duration_months: u8) -> Result<(
         ctx.accounts.subscription.expires_at < clock.unix_timestamp,
         ExchangeError::SubscriptionStillActive,
     );
-    // Beyond the grace window the record is abandoned; buyer must
-    // subscribe fresh so we don't revive stale state indefinitely.
-    let elapsed = clock.unix_timestamp.saturating_sub(ctx.accounts.subscription.expires_at);
-    require!(
-        elapsed <= RENEW_GRACE_SECS,
-        ExchangeError::SubscriptionAbandoned,
-    );
 
     let total_payment = ctx.accounts.listing.price_subscription_monthly
         .checked_mul(duration_months as u64)

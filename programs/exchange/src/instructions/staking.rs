@@ -163,13 +163,6 @@ pub struct SlashProvider<'info> {
         constraint = oracle.key() == exchange.quality_oracle @ ExchangeError::NotQualityOracle,
     )]
     pub oracle: Signer<'info>,
-    /// Exchange authority co-signer. Required for manual / attestation slashes
-    /// that bypass the grace period; unused for PersistentLowQuality but still
-    /// must be a valid signer so the account layout stays stable.
-    #[account(
-        constraint = authority.key() == exchange.authority @ ExchangeError::Unauthorized,
-    )]
-    pub authority: Signer<'info>,
 }
 
 pub fn slash(ctx: Context<SlashProvider>, amount: u64, reason: SlashReason) -> Result<()> {
@@ -179,26 +172,16 @@ pub fn slash(ctx: Context<SlashProvider>, amount: u64, reason: SlashReason) -> R
         ExchangeError::SlashExceedsStake,
     );
 
-    // Slashes that bypass the quality grace period (manual / failed
-    // attestation) must be co-signed by the exchange authority, not the
-    // oracle alone. For PersistentLowQuality the oracle can act unilaterally,
-    // but only once the grace window has elapsed.
-    match reason {
-        SlashReason::PersistentLowQuality => {
-            let clock = Clock::get()?;
-            let since = ctx.accounts.provider.low_quality_since;
-            require!(since != 0, ExchangeError::QualityAboveThreshold);
-            let elapsed = clock.unix_timestamp.saturating_sub(since);
-            require!(
-                elapsed >= ctx.accounts.exchange.slash_grace_period,
-                ExchangeError::SlashGraceNotElapsed,
-            );
-        }
-        SlashReason::FailedAttestation | SlashReason::ManualAuthority => {
-            // `authority` is already constrained to exchange.authority above,
-            // and the constraint wouldn't resolve without a valid signature,
-            // so reaching this arm means the authority really signed.
-        }
+    // Persistent-low-quality slashes must respect the grace period.
+    if matches!(reason, SlashReason::PersistentLowQuality) {
+        let clock = Clock::get()?;
+        let since = ctx.accounts.provider.low_quality_since;
+        require!(since != 0, ExchangeError::QualityAboveThreshold);
+        let elapsed = clock.unix_timestamp.saturating_sub(since);
+        require!(
+            elapsed >= ctx.accounts.exchange.slash_grace_period,
+            ExchangeError::SlashGraceNotElapsed,
+        );
     }
 
     let rent = Rent::get()?;

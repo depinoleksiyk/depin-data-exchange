@@ -11,7 +11,6 @@ const logger = require('./logger');
 const db = require('./db');
 const chain = require('./chain');
 const data = require('./data');
-const crypto = require('node:crypto');
 const {
   hashKey,
   parseBearer,
@@ -20,7 +19,6 @@ const {
 } = require('./access-keys');
 const { SubscriptionCache } = require('./sub-cache');
 const paySol = require('./pay-sol');
-const listingSources = require('./listing-sources');
 
 const subscriptionCache = new SubscriptionCache(config.subCacheTtlMs);
 
@@ -37,13 +35,7 @@ app.use(
 const corsOptions = {
   origin(origin, cb) {
     if (!origin) return cb(null, true); // curl / server-side
-    // Explicit opt-in for wildcard dev mode — empty allowlist no longer
-    // means "accept everything." Missing config = reject cross-origin.
-    if (config.corsAllowAll) return cb(null, true);
-    if (config.corsOrigins.length === 0) {
-      logger.warn({ origin }, 'cors: no allowlist configured, rejecting');
-      return cb(null, false);
-    }
+    if (config.corsOrigins.length === 0) return cb(null, true); // dev = wildcard
     cb(null, config.corsOrigins.includes(origin));
   },
   credentials: false,
@@ -73,12 +65,7 @@ const authedLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => {
     const bearer = parseBearer(req.headers.authorization);
-    if (bearer) {
-      // Use SHA-256 of the full bearer so two tokens sharing a 16-char
-      // prefix land in different buckets, and so the raw bearer never
-      // reaches the limiter's internal key store.
-      return `bearer:${crypto.createHash('sha256').update(bearer).digest('hex')}`;
-    }
+    if (bearer) return `bearer:${bearer.slice(0, 16)}`;
     return `ip:${req.ip || 'unknown'}`;
   },
 });
@@ -254,35 +241,10 @@ app.post('/v1/query/:listingId', async (req, res) => {
     return problem(res, 403, 'listing_mismatch', 'access key is for a different listing');
   }
 
-  db.bumpAccessKeyUsage(auth.keyHash);
-
-  // If the provider has bound a real upstream, proxy the query there.
-  // Otherwise fall back to the baked-in sample set so the marketplace
-  // still feels alive during the devnet preview.
-  const source = listingSources.lookupSource(listingId);
-  if (source) {
-    const upstream = await listingSources.proxyQuery({
-      listingPubkey: listingId,
-      source,
-      dataType,
-      limit,
-      buyer: auth.row.buyer,
-    });
-    return res.status(upstream.ok ? 200 : 502).json({
-      listing: auth.row.listing,
-      source: { url: source.url, upstreamStatus: upstream.status },
-      rows: upstream.rows,
-      upstreamError: upstream.error,
-      deliveredAt: new Date().toISOString(),
-      quota: {
-        used: auth.row.queries_used + 1,
-        limit: auth.row.queries_limit,
-      },
-    });
-  }
-
   const samples = data.samplesFor(dataType);
   const rows = limit && Number.isFinite(+limit) ? samples.rows.slice(0, +limit) : samples.rows;
+
+  db.bumpAccessKeyUsage(auth.keyHash);
 
   res.json({
     listing: auth.row.listing,
@@ -290,66 +252,11 @@ app.post('/v1/query/:listingId', async (req, res) => {
     rows,
     count: rows.length,
     deliveredAt: new Date().toISOString(),
-    fallback: 'mock-samples',
     quota: {
       used: auth.row.queries_used + 1,
       limit: auth.row.queries_limit,
     },
   });
-});
-
-// --- listing source registration ----------------------------------------
-
-// GET /v1/listings/:id/source — public lookup so buyers see where data
-// actually comes from (just the URL + updated-at, never the secret).
-app.get('/v1/listings/:id/source', (req, res) => {
-  const row = listingSources.lookupSource(req.params.id);
-  if (!row) return res.json({ bound: false });
-  return res.json({
-    bound: true,
-    listing: row.listing,
-    provider: row.provider,
-    url: row.url,
-    updatedAt: row.updated_at,
-  });
-});
-
-// POST /v1/listings/:id/challenge — mint a short-lived nonce the provider
-// signs with their wallet key before hitting PUT.
-app.post('/v1/listings/:id/challenge', async (req, res) => {
-  try {
-    const ch = await listingSources.createChallenge(req.params.id);
-    return res.json(ch);
-  } catch (err) {
-    const status = err?.status || 500;
-    const publicMsg = status < 500 ? err.message || 'challenge rejected' : 'internal error';
-    logger.warn({ status, err: err.message }, 'challenge failed');
-    return problem(res, status, 'challenge_failed', publicMsg);
-  }
-});
-
-// PUT /v1/listings/:id/source — bind a URL to the listing. Requires the
-// signed challenge plus a matching on-chain provider.
-app.put('/v1/listings/:id/source', async (req, res) => {
-  const { url, secret, nonce, signature } = req.body || {};
-  if (!url || !nonce || !signature) {
-    return problem(res, 400, 'invalid_body', 'url, nonce, signature required');
-  }
-  try {
-    const result = await listingSources.bindSource({
-      listingPubkey: req.params.id,
-      url,
-      secret,
-      nonce,
-      signatureBase58: signature,
-    });
-    return res.json({ ok: true, ...result });
-  } catch (err) {
-    const status = err?.status || 500;
-    const publicMsg = status < 500 ? err.message || 'bind rejected' : 'internal error';
-    logger.warn({ status, err: err.message }, 'bind failed');
-    return problem(res, status, 'bind_failed', publicMsg);
-  }
 });
 
 // Pay-per-query path: buyer submits a query_data tx, we verify event + deliver.
@@ -405,7 +312,7 @@ app.post('/v1/query-tx/:listingId', async (req, res) => {
 // matching USDC into their ATA, subscribe runs as usual. Only signs txs
 // whose shape matches the expected three-instruction template.
 app.post('/v1/pay-with-sol', async (req, res) => {
-  if (!config.mintAuthorityKeypairPath && !process.env.GATEWAY_MINT_AUTHORITY_JSON) {
+  if (!config.mintAuthorityKeypairPath) {
     return problem(res, 503, 'sol_payment_disabled', 'gateway has no mint authority configured');
   }
   const { serializedTx, listing, buyer, durationMonths, solLamports, solPriceUsd, slippageBps } = req.body || {};
@@ -430,11 +337,7 @@ app.post('/v1/pay-with-sol', async (req, res) => {
       { status, code, msg: err?.message, stack: err?.stack?.split('\n').slice(0, 4) },
       'pay-with-sol rejected'
     );
-    // Expose err.message only on 4xx validation problems — those are
-    // deliberately shaped messages the client needs to act on. 5xx
-    // internal failures get a generic code to avoid leaking internals.
-    const publicMsg = status >= 400 && status < 500 ? err.message || 'request rejected' : 'internal error';
-    return problem(res, status, code, publicMsg);
+    return problem(res, status, code, err.message || 'unknown error');
   }
 });
 
@@ -490,8 +393,7 @@ app.get('/v1/subscription', async (req, res) => {
       accessKeyActive: sub.accessKeyActive,
     });
   } catch (err) {
-    logger.debug({ err: err.message }, 'subscription lookup failed');
-    return problem(res, 400, 'invalid_pubkey', 'listing or buyer is not a valid pubkey');
+    return problem(res, 400, 'invalid_pubkey', err.message);
   }
 });
 
@@ -509,11 +411,7 @@ const wss = new WebSocketServer({ server, path: '/events' });
 
 wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'hello', programId: config.programId }));
-  ws.on('error', (err) => {
-    // Don't crash the gateway on a misbehaving client, but do record it so
-    // floods / abuse / TLS hiccups are visible in logs and metrics.
-    logger.warn({ err: err?.message }, 'ws client error');
-  });
+  ws.on('error', () => {}); // keep server alive on client aborts
 });
 
 function broadcast(msg) {
@@ -591,10 +489,6 @@ setInterval(() => {
   );
   if (confirmed > 0 || pending > 0) {
     logger.debug({ confirmed, pending }, 'replay-store swept');
-  }
-  const expiredChallenges = listingSources.sweepExpiredChallenges();
-  if (expiredChallenges > 0) {
-    logger.debug({ expiredChallenges }, 'challenge sweep');
   }
 }, 60 * 60 * 1000).unref();
 

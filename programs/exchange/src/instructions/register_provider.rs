@@ -2,7 +2,6 @@ use anchor_lang::prelude::*;
 use crate::state::{DataProvider, ProviderStakeVault};
 use crate::errors::ExchangeError;
 use crate::constants::*;
-use crate::events::ProviderRegistered;
 
 #[derive(Accounts)]
 pub struct RegisterProvider<'info> {
@@ -48,10 +47,5 @@ pub fn handler(ctx: Context<RegisterProvider>, name: String) -> Result<()> {
     let vault = &mut ctx.accounts.stake_vault;
     vault.provider = ctx.accounts.wallet.key();
     vault.bump = ctx.bumps.stake_vault;
-
-    emit!(ProviderRegistered {
-        wallet: ctx.accounts.wallet.key(),
-        at: Clock::get()?.unix_timestamp,
-    });
     Ok(())
 }

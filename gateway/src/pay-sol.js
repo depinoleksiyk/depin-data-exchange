@@ -30,34 +30,14 @@ const {
 const config = require('./config');
 const chain = require('./chain');
 const logger = require('./logger');
-const solPrice = require('./sol-price');
 
 const SLIPPAGE_BPS_MAX = 300; // cap the slippage buyers can claim to 3 %
-
-// Forgiving secret-key parser — lets Railway dashboards paste the JSON array
-// with or without enclosing brackets without breaking the gateway boot.
-function parseSecret(raw) {
-  const trimmed = String(raw).trim();
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (Array.isArray(parsed)) return parsed;
-  } catch (_) { /* fall through */ }
-  const inner = trimmed.replace(/^[\[\(]+/, '').replace(/[\]\)]+$/, '');
-  return inner.split(/[,\s]+/).filter(Boolean).map((n) => Number(n));
-}
 
 let cachedKeypair = null;
 function mintAuthority() {
   if (cachedKeypair) return cachedKeypair;
-  // Inline JSON env wins over filesystem path — Railway containers have no
-  // host-level keypair files, so we ship the bytes via env.
-  const inline = process.env.GATEWAY_MINT_AUTHORITY_JSON;
-  if (inline && inline.trim()) {
-    cachedKeypair = Keypair.fromSecretKey(Uint8Array.from(parseSecret(inline)));
-    return cachedKeypair;
-  }
   if (!config.mintAuthorityKeypairPath) {
-    throw new Error('GATEWAY_MINT_AUTHORITY_JSON or GATEWAY_MINT_AUTHORITY_KEYPAIR_PATH not configured');
+    throw new Error('GATEWAY_MINT_AUTHORITY_KEYPAIR_PATH not configured');
   }
   const raw = JSON.parse(fs.readFileSync(config.mintAuthorityKeypairPath, 'utf8'));
   cachedKeypair = Keypair.fromSecretKey(Uint8Array.from(raw));
@@ -199,12 +179,8 @@ async function coSignAndSubmit({
   }
 
   // Verify declared SOL amount matches the USDC the buyer is trying to unlock
-  // within the declared slippage tolerance. The price is fetched server-side
-  // from a trusted oracle — client's solPriceUsd is only used as a sanity
-  // check (it must agree with the oracle within the deviation tolerance).
-  const trustedSolUsd = await solPrice.getTrustedSolUsd();
-  solPrice.assertClientPriceAgrees(solPriceUsd, trustedSolUsd);
-  const expectedLamportsNoSlip = Number(expectedUsdc) * 1_000 / trustedSolUsd;
+  // within the declared slippage tolerance.
+  const expectedLamportsNoSlip = Number(expectedUsdc) * 1_000 / solPriceUsd;
   const minLamports = Math.floor(expectedLamportsNoSlip * (1 - slippageBps / 10_000));
   const maxLamports = Math.ceil(expectedLamportsNoSlip * (1 + slippageBps / 10_000));
   const lamportsNum = Number(solLamports);

@@ -101,44 +101,6 @@ export async function fetchListing(program: Program, pubkey: PublicKey): Promise
   }
 }
 
-export type SubscriptionView = {
-  pubkey: PublicKey;
-  buyer: PublicKey;
-  listing: PublicKey;
-  startedAt: number;
-  expiresAt: number;
-  queriesUsed: number;
-  queriesLimit: number;
-  hasRated: boolean;
-  accessKeyHash: number[];
-  accessKeyActive: boolean;
-  accessKeyIssuedAt: number;
-};
-
-/** Returns every DataSubscription owned by this buyer. buyer pubkey sits at
- *  offset 8 (first field after the 8-byte Anchor discriminator). */
-export async function fetchSubscriptionsForBuyer(
-  program: Program,
-  buyer: PublicKey
-): Promise<SubscriptionView[]> {
-  const rows = await (program.account as any).dataSubscription.all([
-    { memcmp: { offset: 8, bytes: buyer.toBase58() } },
-  ]);
-  return rows.map(({ publicKey, account }: any) => ({
-    pubkey: publicKey,
-    buyer: account.buyer as PublicKey,
-    listing: account.listing as PublicKey,
-    startedAt: Number(account.startedAt),
-    expiresAt: Number(account.expiresAt),
-    queriesUsed: Number(account.queriesUsed),
-    queriesLimit: Number(account.queriesLimit),
-    hasRated: account.hasRated as boolean,
-    accessKeyHash: Array.from(account.accessKeyHash) as number[],
-    accessKeyActive: account.accessKeyActive as boolean,
-    accessKeyIssuedAt: Number(account.accessKeyIssuedAt),
-  }));
-}
-
 export async function fetchSubscriptionView(
   program: Program,
   listing: PublicKey,
@@ -220,6 +182,19 @@ export async function ensureUsdcAta(
     ixs.push(createAssociatedTokenAccountInstruction(payer, ata, owner, USDC_MINT));
   }
   return ata;
+}
+
+export async function airdropUsdcIx(
+  connection: Connection,
+  ata: PublicKey,
+  owner: PublicKey,
+  amountRaw: bigint
+): Promise<TransactionInstruction | null> {
+  // mock USDC is freely mintable by the exchange authority — we only use this
+  // for demo purposes; the instruction requires the authority's signature so
+  // we can't mint directly from the buyer. This is a no-op placeholder unless
+  // the client is the authority.
+  return null;
 }
 
 export function randomAccessKey(): string {
