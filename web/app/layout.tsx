@@ -13,6 +13,11 @@ export const metadata: Metadata = {
     title: 'DePIN Data Exchange',
     description: 'Buy, sell and verify real-world data streams on Solana.',
     type: 'website',
+    images: ['/og.svg'],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    images: ['/og.svg'],
   },
   icons: { icon: '/favicon.svg' },
 };

@@ -2,6 +2,9 @@
 
 A decentralized marketplace for buying and selling verified IoT and DePIN data streams on Solana.
 
+**Marketplace (devnet):** [depin-data-exchange.vercel.app](https://depin-data-exchange.vercel.app)
+**Registry program (devnet):** `3gGkKra1uhoDukSkFLCux8j3gkxoMdUjzMfHzLGKkyzk`
+
 ## Use Cases
 
 - **Fleet Management**: Purchase real-time GPS data from Hivemapper dashcams
